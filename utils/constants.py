@@ -1,0 +1,7 @@
+PLAYER_X = 'X'
+PLAYER_O = 'O'
+EMPTY = ' '
+
+WIN_SCORE = 10
+LOSE_SCORE = -10
+TIE_SCORE = 0
