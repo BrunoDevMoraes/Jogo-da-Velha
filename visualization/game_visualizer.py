@@ -41,9 +41,19 @@ class GameVisualizer:
         return html
 
     def _get_decision_explanation(self, move: MoveAnalysis) -> str:
-        """Creates a detailed explanation of the Minimax decision process."""
+        """Creates a detailed explanation of the decision process."""
         player_type = "maximizador" if move.player == 'X' else "minimizador"
         objective = "MAIOR" if move.player == 'X' else "MENOR"
+        
+        # Determina o nome do algoritmo
+        if move.algorithm_name:
+            algorithm_display = move.algorithm_name.replace('Player', '')
+            if 'AlphaBeta' in move.algorithm_name:
+                algorithm_title = f"Alpha-Beta Pruning"
+            else:
+                algorithm_title = algorithm_display
+        else:
+            algorithm_title = "Minimax"
 
         sorted_alts = sorted(
             move.alternatives,
@@ -56,7 +66,7 @@ class GameVisualizer:
 
         explanation = f'''
         <div class="decision-explanation">
-            <h4>🧠 Processo de Decisão do Minimax</h4>
+            <h4>🧠 Processo de Decisão do {algorithm_title}</h4>
 
             <div class="step">
                 <span class="step-num">1</span>
@@ -72,6 +82,7 @@ class GameVisualizer:
                     <strong>Simulação Recursiva</strong>
                     <p>Para cada posição, o algoritmo simulou <strong>todas as partidas possíveis</strong> até o final,
                     avaliando <strong>{move.nodes_evaluated:,}</strong> estados do tabuleiro.</p>
+                    {'<p class="highlight-text">⚡ Com Alpha-Beta Pruning, alguns ramos foram cortados para otimizar a busca!</p>' if 'AlphaBeta' in str(move.algorithm_name) else ''}
                 </div>
             </div>
 
@@ -176,6 +187,18 @@ class GameVisualizer:
         moves = self.history.get_ai_moves()
         total_nodes = self.history.get_total_nodes()
         total_time = self.history.get_total_time()
+        
+        # Detecta quais algoritmos foram usados
+        algorithms_used = set()
+        for move in moves:
+            if move.algorithm_name:
+                algo_name = move.algorithm_name.replace('Player', '').replace('AlphaBeta', 'Alpha-Beta')
+                algorithms_used.add(algo_name)
+        
+        if algorithms_used:
+            algorithm_description = " e ".join(sorted(algorithms_used))
+        else:
+            algorithm_description = "Minimax"
 
         result_text = ""
         result_class = ""
@@ -194,7 +217,13 @@ class GameVisualizer:
         for move in moves:
             player_class = "player-x" if move.player == 'X' else "player-o"
             player_icon = "🔵" if move.player == 'X' else "🔴"
-            player_role = "MAX (Maximizador)" if move.player == 'X' else "MIN (Minimizador)"
+            
+            # Usa o nome do algoritmo se disponível, senão usa MAX/MIN baseado no jogador
+            if move.algorithm_name:
+                algorithm_display = move.algorithm_name.replace('Player', '').replace('AlphaBeta', 'Alpha-Beta')
+                player_role = f"{algorithm_display} ({'Maximizador' if move.player == 'X' else 'Minimizador'})"
+            else:
+                player_role = "MAX (Maximizador)" if move.player == 'X' else "MIN (Minimizador)"
 
             moves_html += f'''
             <div class="move-card {player_class}">
@@ -226,6 +255,7 @@ class GameVisualizer:
                 <div class="move-stats">
                     <span title="Tempo que a IA levou para calcular">⏱️ {move.time_ms:.1f}ms</span>
                     <span title="Quantidade de estados do tabuleiro analisados">🔍 {move.nodes_evaluated:,} nós avaliados</span>
+                    {f'<span title="Nós podados pelo Alpha-Beta">✂️ {move.nodes_pruned:,} nós podados</span>' if move.nodes_pruned and move.nodes_pruned > 0 else ''}
                 </div>
 
                 {self._get_decision_explanation(move)}
@@ -241,7 +271,7 @@ class GameVisualizer:
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Análise da Partida - Jogo da Velha com Minimax</title>
+    <title>Análise da Partida - Jogo da Velha com {algorithm_description}</title>
     <style>
         * {{
             box-sizing: border-box;
@@ -758,7 +788,7 @@ class GameVisualizer:
     <div class="container">
         <div class="header">
             <h1>🎮 Análise da Partida</h1>
-            <p>Visualização completa do algoritmo Minimax em ação</p>
+            <p>Visualização completa do algoritmo {algorithm_description} em ação</p>
         </div>
 
         <div class="stats-bar">
@@ -781,12 +811,13 @@ class GameVisualizer:
         </div>
 
         <div class="info-section">
-            <h3>📚 Como funciona o Algoritmo Minimax?</h3>
+            <h3>📚 Como funciona o Algoritmo {algorithm_description}?</h3>
             <div class="info-grid">
                 <div class="info-card">
                     <h4>🎯 O que é o Minimax?</h4>
                     <p>O Minimax é um algoritmo de busca em árvore usado em jogos de dois jogadores.
                     Ele simula todas as jogadas possíveis até o final do jogo para encontrar o movimento ótimo.</p>
+                    {'<p><strong>Alpha-Beta Pruning:</strong> Uma otimização que corta ramos desnecessários da árvore de decisão, mantendo o mesmo resultado mas avaliando menos nós!</p>' if 'Alpha-Beta' in algorithm_description else ''}
                 </div>
 
                 <div class="info-card">
@@ -819,8 +850,8 @@ class GameVisualizer:
 
                 <div class="info-card">
                     <h4>🏆 Resultado Garantido</h4>
-                    <p>Com dois jogadores usando Minimax perfeitamente, o jogo <strong>sempre termina em empate</strong>.
-                    É impossível vencer uma IA com Minimax se você também jogar perfeitamente!</p>
+                    <p>Com dois jogadores usando algoritmos perfeitos ({algorithm_description}), o jogo <strong>sempre termina em empate</strong>.
+                    É impossível vencer uma IA com esses algoritmos se você também jogar perfeitamente!</p>
                 </div>
             </div>
         </div>

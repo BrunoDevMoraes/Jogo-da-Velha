@@ -14,6 +14,8 @@ class MoveAnalysis:
     alternatives: List[Dict]  # [{position: int, score: int}, ...]
     nodes_evaluated: int
     time_ms: float
+    algorithm_name: Optional[str] = None  # Name of the AI algorithm used (e.g., "MinimaxPlayer", "AlphaBetaPlayer")
+    nodes_pruned: Optional[int] = None  # Number of nodes pruned (for Alpha-Beta)
     is_terminal: bool = False
     result: Optional[str] = None  # 'WIN_X', 'WIN_O', 'TIE'
 
@@ -35,7 +37,9 @@ class GameHistoryCollector:
         board_after: List[str],
         alternatives: List[Dict],
         nodes_evaluated: int,
-        time_ms: float
+        time_ms: float,
+        algorithm_name: Optional[str] = None,
+        nodes_pruned: Optional[int] = None
     ):
         """
         Records a move with its analysis.
@@ -49,6 +53,8 @@ class GameHistoryCollector:
             alternatives: List of alternative moves with scores.
             nodes_evaluated: Number of nodes evaluated.
             time_ms: Time taken to compute the move.
+            algorithm_name: Name of the AI algorithm used (e.g., "MinimaxPlayer", "AlphaBetaPlayer").
+            nodes_pruned: Number of nodes pruned (for Alpha-Beta algorithm).
         """
         self._current_move_number += 1
 
@@ -61,7 +67,9 @@ class GameHistoryCollector:
             board_after=board_after.copy(),
             alternatives=alternatives,
             nodes_evaluated=nodes_evaluated,
-            time_ms=time_ms
+            time_ms=time_ms,
+            algorithm_name=algorithm_name,
+            nodes_pruned=nodes_pruned
         )
 
         self.moves.append(move)

@@ -7,6 +7,7 @@ from game.game_logic import GameLogic
 from ai.base_player import BasePlayer
 from ai.random_player import RandomPlayer
 from ai.minimax_player import MinimaxPlayer
+from ai.alpha_beta_player import AlphaBetaPlayer
 from utils.constants import PLAYER_X, PLAYER_O
 from visualization.game_history import GameHistoryCollector
 from visualization.game_visualizer import GameVisualizer
@@ -17,6 +18,7 @@ class GameGUI:
 
     PLAYER_TYPES = {
         'Minimax': MinimaxPlayer,
+        'Alpha-Beta': AlphaBetaPlayer,
         'Random': RandomPlayer
     }
 
@@ -199,7 +201,7 @@ class GameGUI:
         self.game_finished = False
 
         if mode == 'PVE':
-            self.player_o = MinimaxPlayer(PLAYER_O)
+            self.player_o = AlphaBetaPlayer(PLAYER_O)
         elif mode == 'EVE' and self.player_x is None:
             self.player_x = MinimaxPlayer(PLAYER_X)
             self.player_o = MinimaxPlayer(PLAYER_O)
@@ -329,7 +331,7 @@ class GameGUI:
         if move != -1:
             self._make_move(move)
 
-            if isinstance(player, MinimaxPlayer):
+            if isinstance(player, (MinimaxPlayer, AlphaBetaPlayer)):
                 self.history.record_move(
                     player=player.symbol,
                     chosen_position=move,
@@ -338,7 +340,9 @@ class GameGUI:
                     board_after=self.board.cells.copy(),
                     alternatives=stats.get('alternatives', []),
                     nodes_evaluated=stats['nodes_evaluated'],
-                    time_ms=stats['time_ms']
+                    time_ms=stats['time_ms'],
+                    algorithm_name=player.get_name(),
+                    nodes_pruned=stats.get('nodes_pruned')
                 )
 
             self._show_stats(player.get_name(), stats)
@@ -355,7 +359,12 @@ class GameGUI:
             player_name: Name of the AI algorithm.
             stats: Dictionary with nodes_evaluated and time_ms.
         """
-        text = f"{player_name}: {stats['nodes_evaluated']} nós | {stats['time_ms']:.1f}ms"
+        nodes_text = f"{stats['nodes_evaluated']} nós"
+        if 'nodes_pruned' in stats and stats['nodes_pruned'] > 0:
+            nodes_text += f" | {stats['nodes_pruned']} podados"
+            if 'pruning_rate' in stats:
+                nodes_text += f" ({stats['pruning_rate']}%)"
+        text = f"{player_name}: {nodes_text} | {stats['time_ms']:.1f}ms"
         self.lbl_stats.config(text=text)
 
     def _make_move(self, index: int):
