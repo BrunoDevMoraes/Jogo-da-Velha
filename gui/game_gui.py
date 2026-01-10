@@ -7,9 +7,16 @@ from game.game_logic import GameLogic
 from ai.base_player import BasePlayer
 from ai.random_player import RandomPlayer
 from ai.minimax_player import MinimaxPlayer
+from ai.alpha_beta_player import AlphaBetaPlayer
+from ai.alpha_beta_tt_player import AlphaBetaTTPlayer
+from ai.alpha_beta_symmetry_player import AlphaBetaSymmetryPlayer
+from ai.negascout_player import NegaScoutPlayer
 from utils.constants import PLAYER_X, PLAYER_O
 from visualization.game_history import GameHistoryCollector
 from visualization.game_visualizer import GameVisualizer
+from visualization.tree_data import MinimaxTreeCollector
+from visualization.tree_visualizer import TreeVisualizer
+from visualization.comparison_visualizer import ComparisonVisualizer
 
 
 class GameGUI:
@@ -17,6 +24,10 @@ class GameGUI:
 
     PLAYER_TYPES = {
         'Minimax': MinimaxPlayer,
+        'Alpha-Beta': AlphaBetaPlayer,
+        'AB + Transposition': AlphaBetaTTPlayer,
+        'AB + Simetria': AlphaBetaSymmetryPlayer,
+        'NegaScout': NegaScoutPlayer,
         'Random': RandomPlayer
     }
 
@@ -92,8 +103,33 @@ class GameGUI:
         )
         btn_eve.pack(pady=10)
 
-        sep = ttk.Separator(self.frame_menu, orient='horizontal')
-        sep.pack(fill='x', pady=20, padx=50)
+        sep1 = ttk.Separator(self.frame_menu, orient='horizontal')
+        sep1.pack(fill='x', pady=20, padx=50)
+
+        btn_tree_viz = tk.Button(
+            self.frame_menu,
+            text="Visualizar Arvore Minimax",
+            font=("Arial", 14),
+            width=20,
+            command=self._show_tree_visualization_menu,
+            bg="#9b59b6",
+            fg="white"
+        )
+        btn_tree_viz.pack(pady=10)
+
+        btn_compare = tk.Button(
+            self.frame_menu,
+            text="Comparar Algoritmos",
+            font=("Arial", 14),
+            width=20,
+            command=self._show_comparison_screen,
+            bg="#e67e22",
+            fg="white"
+        )
+        btn_compare.pack(pady=10)
+
+        sep2 = ttk.Separator(self.frame_menu, orient='horizontal')
+        sep2.pack(fill='x', pady=20, padx=50)
 
         chk_viz = tk.Checkbutton(
             self.frame_menu,
@@ -329,7 +365,8 @@ class GameGUI:
         if move != -1:
             self._make_move(move)
 
-            if isinstance(player, MinimaxPlayer):
+            if isinstance(player, (MinimaxPlayer, AlphaBetaPlayer, AlphaBetaTTPlayer,
+                                   AlphaBetaSymmetryPlayer, NegaScoutPlayer)):
                 self.history.record_move(
                     player=player.symbol,
                     chosen_position=move,
@@ -430,6 +467,164 @@ class GameGUI:
         """Disables all board buttons."""
         for btn in self.buttons:
             btn.config(state="disabled")
+
+    def _show_tree_visualization_menu(self):
+        """Shows the tree visualization options screen."""
+        for widget in self.frame_menu.winfo_children():
+            widget.destroy()
+
+        lbl_title = tk.Label(
+            self.frame_menu,
+            text="Visualizar Arvore Minimax",
+            font=("Helvetica", 20, "bold")
+        )
+        lbl_title.pack(pady=20)
+
+        lbl_info = tk.Label(
+            self.frame_menu,
+            text="Gera a arvore completa do algoritmo Minimax\na partir de um tabuleiro vazio.",
+            font=("Arial", 10),
+            fg="gray"
+        )
+        lbl_info.pack(pady=5)
+
+        frame_ai = tk.Frame(self.frame_menu)
+        frame_ai.pack(pady=15)
+        tk.Label(
+            frame_ai,
+            text="Perspectiva da IA:",
+            font=("Arial", 12)
+        ).pack(side=tk.LEFT)
+        self.combo_ai_perspective = ttk.Combobox(
+            frame_ai,
+            values=["X (primeiro a jogar)", "O (segundo a jogar)"],
+            state="readonly",
+            width=20
+        )
+        self.combo_ai_perspective.set("X (primeiro a jogar)")
+        self.combo_ai_perspective.pack(side=tk.LEFT, padx=10)
+
+        lbl_viz_type = tk.Label(
+            self.frame_menu,
+            text="Escolha o tipo de visualizacao:",
+            font=("Arial", 12, "bold")
+        )
+        lbl_viz_type.pack(pady=(20, 10))
+
+        btn_collapsible = tk.Button(
+            self.frame_menu,
+            text="Arvore Colapsavel",
+            font=("Arial", 12),
+            width=25,
+            command=lambda: self._generate_tree_visualization("collapsible"),
+            bg="#3498db",
+            fg="white"
+        )
+        btn_collapsible.pack(pady=5)
+        tk.Label(
+            self.frame_menu,
+            text="Nos expansiveis com zoom/pan interativo",
+            font=("Arial", 9),
+            fg="gray"
+        ).pack()
+
+        btn_sunburst = tk.Button(
+            self.frame_menu,
+            text="Sunburst (Radial)",
+            font=("Arial", 12),
+            width=25,
+            command=lambda: self._generate_tree_visualization("sunburst"),
+            bg="#f39c12",
+            fg="white"
+        )
+        btn_sunburst.pack(pady=(15, 5))
+        tk.Label(
+            self.frame_menu,
+            text="Hierarquia radial - cada anel = nivel de profundidade",
+            font=("Arial", 9),
+            fg="gray"
+        ).pack()
+
+        btn_treemap = tk.Button(
+            self.frame_menu,
+            text="Treemap",
+            font=("Arial", 12),
+            width=25,
+            command=lambda: self._generate_tree_visualization("treemap"),
+            bg="#2ecc71",
+            fg="white"
+        )
+        btn_treemap.pack(pady=(15, 5))
+        tk.Label(
+            self.frame_menu,
+            text="Retangulos aninhados - tamanho = numero de sub-nos",
+            font=("Arial", 9),
+            fg="gray"
+        ).pack()
+
+        btn_back = tk.Button(
+            self.frame_menu,
+            text="< Voltar",
+            command=self._create_main_menu
+        )
+        btn_back.pack(pady=20)
+
+    def _generate_tree_visualization(self, viz_type: str):
+        """
+        Generates and displays the tree visualization.
+
+        Args:
+            viz_type: Type of visualization ('collapsible', 'sunburst', 'treemap').
+        """
+        perspective = self.combo_ai_perspective.get()
+        ai_symbol = PLAYER_X if "X" in perspective else PLAYER_O
+
+        self.lbl_processing_tree = tk.Label(
+            self.frame_menu,
+            text="Gerando arvore... Por favor aguarde.",
+            font=("Arial", 11),
+            fg="#3498db"
+        )
+        self.lbl_processing_tree.pack(pady=10)
+        self.root.update()
+
+        def generate_and_show():
+            board = Board()
+            collector = MinimaxTreeCollector(ai_symbol)
+            collector.build_tree(board)
+
+            visualizer = TreeVisualizer(collector)
+
+            if viz_type == "collapsible":
+                visualizer.show_collapsible_tree()
+            elif viz_type == "sunburst":
+                visualizer.show_sunburst()
+            elif viz_type == "treemap":
+                visualizer.show_treemap()
+
+            self.root.after(0, lambda: self.lbl_processing_tree.config(
+                text=f"Arvore gerada! {collector.nodes_evaluated:,} nos avaliados."
+            ))
+
+        thread = threading.Thread(target=generate_and_show)
+        thread.daemon = True
+        thread.start()
+
+    def _show_comparison_screen(self):
+        """Shows the algorithm comparison report in browser."""
+        def run_comparison():
+            visualizer = ComparisonVisualizer()
+            visualizer.show()
+
+        thread = threading.Thread(target=run_comparison)
+        thread.daemon = True
+        thread.start()
+
+        messagebox.showinfo(
+            "Comparativo",
+            "Gerando relatorio de comparacao...\n"
+            "O navegador abrira automaticamente quando estiver pronto."
+        )
 
     def _back_to_menu(self):
         """Returns to the main menu."""

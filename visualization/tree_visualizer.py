@@ -1,558 +1,668 @@
+"""Tree visualization module with multiple visualization techniques."""
+
 import webbrowser
 import tempfile
-import os
-from typing import Dict, List, Optional
-from visualization.node_collector import NodeCollector, TreeNode
-
-try:
-    import plotly.graph_objects as go
-    PLOTLY_AVAILABLE = True
-except ImportError:
-    PLOTLY_AVAILABLE = False
-
-
-POSITION_NAMES = {
-    0: "Superior Esquerdo",
-    1: "Superior Centro",
-    2: "Superior Direito",
-    3: "Centro Esquerdo",
-    4: "Centro",
-    5: "Centro Direito",
-    6: "Inferior Esquerdo",
-    7: "Inferior Centro",
-    8: "Inferior Direito"
-}
-
-COLORS = {
-    'max_node': '#3498db',
-    'min_node': '#e74c3c',
-    'terminal_win': '#27ae60',
-    'terminal_lose': '#8e44ad',
-    'terminal_tie': '#f39c12',
-    'optimal_edge': '#2ecc71',
-    'normal_edge': '#bdc3c7',
-    'background': '#1a1a2e',
-    'text': '#ffffff'
-}
+import json
+from typing import Dict, Any
+from visualization.tree_data import MinimaxTreeCollector
 
 
 class TreeVisualizer:
-    """Creates interactive visualizations of the Minimax search tree."""
+    """Visualizes Minimax trees using various techniques."""
 
-    def __init__(self, collector: NodeCollector):
+    def __init__(self, collector: MinimaxTreeCollector):
         """
-        Initializes the visualizer with collected node data.
+        Initializes the visualizer.
 
         Args:
-            collector: NodeCollector with tree data.
+            collector: The tree collector with built tree data.
         """
         self.collector = collector
-        self.positions: Dict[int, tuple] = {}
+        self.ai_symbol = collector.ai_symbol
 
-    def _get_explanation(self, node: TreeNode) -> str:
-        """
-        Returns a didactic explanation for the node in Portuguese.
+    def _open_in_browser(self, html_content: str):
+        """Opens HTML content in the default browser."""
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.html', delete=False, encoding='utf-8'
+        ) as f:
+            f.write(html_content)
+            webbrowser.open('file://' + f.name)
 
-        Args:
-            node: The tree node.
-
-        Returns:
-            Explanation text in Portuguese.
-        """
-        if node.depth == 0:
-            return (
-                "🎯 INÍCIO DA BUSCA!<br>"
-                "A IA analisa todas as jogadas<br>"
-                "possíveis para encontrar o<br>"
-                "melhor movimento."
-            )
-
-        if node.node_type == 'TERMINAL':
-            if node.terminal_type == 'WIN':
-                return (
-                    "🏆 VITÓRIA ENCONTRADA!<br>"
-                    f"Score: {node.score}<br>"
-                    "Quanto mais rápido ganhar,<br>"
-                    "melhor o score!"
-                )
-            elif node.terminal_type == 'LOSE':
-                return (
-                    "❌ DERROTA ENCONTRADA!<br>"
-                    f"Score: {node.score}<br>"
-                    "Quanto mais demorar para<br>"
-                    "perder, menor a penalidade."
-                )
-            else:
-                return (
-                    "🤝 EMPATE ENCONTRADO!<br>"
-                    "Score: 0<br>"
-                    "Nenhum jogador vence<br>"
-                    "neste caminho."
-                )
-
-        if node.is_optimal_path:
-            return (
-                "⭐ CAMINHO ESCOLHIDO!<br>"
-                f"Score: {node.score}<br>"
-                "Este é o movimento ótimo<br>"
-                "escolhido pela IA."
-            )
-
-        if node.node_type == 'MAX':
-            return (
-                "🔵 TURNO DA IA (MAX)<br>"
-                f"Score: {node.score}<br>"
-                "A IA quer MAXIMIZAR.<br>"
-                "Escolhe o filho com<br>"
-                "MAIOR valor."
-            )
-        else:
-            return (
-                "🔴 TURNO OPONENTE (MIN)<br>"
-                f"Score: {node.score}<br>"
-                "O oponente quer MINIMIZAR.<br>"
-                "Escolhe o filho com<br>"
-                "MENOR valor."
-            )
-
-    def _get_board_display(self, board: List[str]) -> str:
-        """
-        Creates a text representation of the board.
-
-        Args:
-            board: Board state as list.
-
-        Returns:
-            Formatted board string.
-        """
-        rows = []
-        for i in range(0, 9, 3):
-            row = f"{board[i]}│{board[i+1]}│{board[i+2]}"
-            rows.append(row)
-        return "<br>─┼─┼─<br>".join(rows)
-
-    def _calculate_positions(self):
-        """Calculates x,y positions for each node in a tree layout."""
-        nodes = self.collector.get_nodes()
-        if not nodes:
+    def show_collapsible_tree(self):
+        """Shows the tree as a collapsible D3.js tree."""
+        if not self.collector.root:
+            print("No tree data available.")
             return
 
-        depth_nodes: Dict[int, List[TreeNode]] = {}
-        for node in nodes:
-            if node.depth not in depth_nodes:
-                depth_nodes[node.depth] = []
-            depth_nodes[node.depth].append(node)
-
-        max_depth = max(depth_nodes.keys()) if depth_nodes else 0
-
-        for depth, nodes_at_depth in depth_nodes.items():
-            y = -depth * 1.5
-            count = len(nodes_at_depth)
-            width = max(count * 1.2, 2)
-
-            for i, node in enumerate(nodes_at_depth):
-                if count == 1:
-                    x = 0
-                else:
-                    x = -width/2 + (i * width / (count - 1))
-                self.positions[node.node_id] = (x, y)
-
-    def _get_node_color(self, node: TreeNode) -> str:
-        """
-        Determines the color for a node.
-
-        Args:
-            node: The tree node.
-
-        Returns:
-            Hex color string.
-        """
-        if node.node_type == 'TERMINAL':
-            if node.terminal_type == 'WIN':
-                return COLORS['terminal_win']
-            elif node.terminal_type == 'LOSE':
-                return COLORS['terminal_lose']
-            else:
-                return COLORS['terminal_tie']
-
-        if node.node_type == 'MAX':
-            return COLORS['max_node']
-        else:
-            return COLORS['min_node']
-
-    def generate_figure(self) -> Optional[go.Figure]:
-        """
-        Generates the Plotly figure for the tree.
-
-        Returns:
-            Plotly Figure object or None if Plotly not available.
-        """
-        if not PLOTLY_AVAILABLE:
-            return None
-
-        self._calculate_positions()
-        nodes = self.collector.get_nodes()
-        edges = self.collector.get_edges()
-
-        if not nodes:
-            return None
-
-        edge_traces = []
-        for parent_id, child_id in edges:
-            if parent_id in self.positions and child_id in self.positions:
-                x0, y0 = self.positions[parent_id]
-                x1, y1 = self.positions[child_id]
-
-                parent_node = nodes[parent_id]
-                child_node = nodes[child_id]
-                is_optimal = parent_node.is_optimal_path and child_node.is_optimal_path
-
-                edge_traces.append(go.Scatter(
-                    x=[x0, x1, None],
-                    y=[y0, y1, None],
-                    mode='lines',
-                    line=dict(
-                        width=4 if is_optimal else 2,
-                        color=COLORS['optimal_edge'] if is_optimal else COLORS['normal_edge']
-                    ),
-                    hoverinfo='none',
-                    showlegend=False
-                ))
-
-        node_x = []
-        node_y = []
-        node_colors = []
-        node_sizes = []
-        node_symbols = []
-        hover_texts = []
-
-        for node in nodes:
-            if node.node_id in self.positions:
-                x, y = self.positions[node.node_id]
-                node_x.append(x)
-                node_y.append(y)
-                node_colors.append(self._get_node_color(node))
-                node_sizes.append(35 if node.is_optimal_path else 25)
-
-                if node.node_type == 'MAX':
-                    node_symbols.append('circle')
-                elif node.node_type == 'MIN':
-                    node_symbols.append('square')
-                else:
-                    node_symbols.append('diamond')
-
-                move_text = ""
-                if node.move is not None:
-                    move_text = f"<br>Jogada: {POSITION_NAMES.get(node.move, node.move)}"
-
-                board_display = self._get_board_display(node.board_state)
-                explanation = self._get_explanation(node)
-
-                hover_text = (
-                    f"<b>{'MAX' if node.node_type == 'MAX' else 'MIN' if node.node_type == 'MIN' else 'TERMINAL'}</b>"
-                    f"<br>Profundidade: {node.depth}"
-                    f"{move_text}"
-                    f"<br>Score: {node.score if node.score is not None else '?'}"
-                    f"<br><br>{board_display}"
-                    f"<br><br>{explanation}"
-                )
-                hover_texts.append(hover_text)
-
-        node_trace = go.Scatter(
-            x=node_x,
-            y=node_y,
-            mode='markers',
-            marker=dict(
-                size=node_sizes,
-                color=node_colors,
-                symbol=node_symbols,
-                line=dict(width=2, color='white')
-            ),
-            text=hover_texts,
-            hoverinfo='text',
-            hoverlabel=dict(
-                bgcolor='rgba(0,0,0,0.8)',
-                font=dict(size=12, family='Courier New'),
-                align='left'
-            ),
-            showlegend=False
-        )
-
-        score_x = []
-        score_y = []
-        score_texts = []
-
-        for node in nodes:
-            if node.node_id in self.positions and node.score is not None:
-                x, y = self.positions[node.node_id]
-                score_x.append(x)
-                score_y.append(y - 0.3)
-                score_texts.append(str(node.score))
-
-        score_trace = go.Scatter(
-            x=score_x,
-            y=score_y,
-            mode='text',
-            text=score_texts,
-            textfont=dict(size=10, color='white'),
-            hoverinfo='none',
-            showlegend=False
-        )
-
-        fig = go.Figure(data=edge_traces + [node_trace, score_trace])
-
+        tree_data = self.collector.root.to_dict()
         stats = self.collector.get_statistics()
+        html = self._generate_collapsible_tree_html(tree_data, stats)
+        self._open_in_browser(html)
 
-        fig.update_layout(
-            title=dict(
-                text=(
-                    f"<b>🌳 Árvore de Busca Minimax</b><br>"
-                    f"<sup>Nós avaliados: {stats['total_nodes']} | "
-                    f"Profundidade máxima: {stats.get('max_depth', 0)} | "
-                    f"Nós terminais: {stats.get('terminal_nodes', 0)}</sup>"
-                ),
-                font=dict(size=18, color='white'),
-                x=0.5
-            ),
-            showlegend=False,
-            hovermode='closest',
-            plot_bgcolor=COLORS['background'],
-            paper_bgcolor=COLORS['background'],
-            xaxis=dict(
-                showgrid=False,
-                zeroline=False,
-                showticklabels=False
-            ),
-            yaxis=dict(
-                showgrid=False,
-                zeroline=False,
-                showticklabels=False
-            ),
-            margin=dict(l=40, r=40, t=80, b=40),
-            annotations=[
-                dict(
-                    text=(
-                        "<b>Legenda:</b> "
-                        "🔵 MAX (IA) | 🔴 MIN (Oponente) | "
-                        "💎 Terminal | ━━ Caminho Ótimo"
-                    ),
-                    xref="paper", yref="paper",
-                    x=0.5, y=-0.05,
-                    showarrow=False,
-                    font=dict(size=12, color='white'),
-                    align='center'
-                )
-            ]
-        )
-
-        return fig
-
-    def show(self):
-        """Opens the visualization in the default web browser."""
-        if not PLOTLY_AVAILABLE:
-            print("Plotly nao esta instalado. Execute: pip install plotly")
+    def show_sunburst(self):
+        """Shows the tree as a sunburst chart."""
+        if not self.collector.root:
+            print("No tree data available.")
             return
 
-        fig = self.generate_figure()
-        if fig is None:
-            print("Nenhum dado para visualizar.")
-            return
-
+        tree_data = self.collector.root.to_dict()
         stats = self.collector.get_statistics()
+        html = self._generate_sunburst_html(tree_data, stats)
+        self._open_in_browser(html)
 
-        html_content = f'''
-<!DOCTYPE html>
-<html>
+    def show_treemap(self):
+        """Shows the tree as a treemap."""
+        if not self.collector.root:
+            print("No tree data available.")
+            return
+
+        tree_data = self.collector.root.to_dict()
+        stats = self.collector.get_statistics()
+        html = self._generate_treemap_html(tree_data, stats)
+        self._open_in_browser(html)
+
+    def _generate_collapsible_tree_html(self, tree_data: Dict, stats: Dict) -> str:
+        """Generates HTML for collapsible tree visualization."""
+        tree_json = json.dumps(tree_data)
+        ai_symbol = self.ai_symbol
+        opponent = 'O' if ai_symbol == 'X' else 'X'
+
+        return f'''<!DOCTYPE html>
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Visualizacao Minimax - Jogo da Velha</title>
+    <title>Arvore Minimax - Collapsible Tree</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
-            font-family: 'Segoe UI', Arial, sans-serif;
+            font-family: 'Segoe UI', sans-serif;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            margin: 0;
-            padding: 20px;
             min-height: 100vh;
+            color: white;
         }}
         .header {{
+            padding: 20px;
             text-align: center;
-            color: white;
-            margin-bottom: 20px;
+            background: rgba(0,0,0,0.3);
         }}
-        .header h1 {{
-            margin: 0;
-            font-size: 28px;
-            background: linear-gradient(90deg, #3498db, #2ecc71);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }}
-        .stats-container {{
+        .header h1 {{ font-size: 1.8em; margin-bottom: 10px; }}
+        .stats {{
             display: flex;
             justify-content: center;
             gap: 30px;
-            margin-bottom: 20px;
+            margin-top: 15px;
         }}
-        .stat-box {{
-            background: rgba(255,255,255,0.1);
-            border-radius: 10px;
-            padding: 15px 25px;
-            text-align: center;
-            color: white;
+        .stat {{ text-align: center; }}
+        .stat-value {{ font-size: 1.5em; font-weight: bold; color: #3498db; }}
+        .stat-label {{ font-size: 0.85em; color: #95a5a6; }}
+        .controls {{
+            padding: 15px;
+            background: rgba(0,0,0,0.2);
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            flex-wrap: wrap;
         }}
-        .stat-number {{
-            font-size: 24px;
-            font-weight: bold;
-            color: #3498db;
+        .controls button {{
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9em;
         }}
-        .stat-label {{
-            font-size: 12px;
-            color: #bdc3c7;
-        }}
+        .btn-expand {{ background: #2ecc71; color: white; }}
+        .btn-collapse {{ background: #e74c3c; color: white; }}
+        .btn-reset {{ background: #3498db; color: white; }}
         .legend {{
             display: flex;
             justify-content: center;
             gap: 20px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }}
-        .legend-item {{
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: white;
-            font-size: 14px;
-        }}
-        .legend-circle {{
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-        }}
-        .legend-square {{
-            width: 16px;
-            height: 16px;
-        }}
-        .legend-diamond {{
-            width: 12px;
-            height: 12px;
-            transform: rotate(45deg);
-        }}
-        .info-panel {{
-            background: rgba(255,255,255,0.05);
-            border-radius: 10px;
-            padding: 15px;
-            margin: 20px auto;
-            max-width: 800px;
-            color: white;
-        }}
-        .info-panel h3 {{
-            margin-top: 0;
-            color: #3498db;
-        }}
-        .info-panel ul {{
-            margin: 0;
-            padding-left: 20px;
-        }}
-        .info-panel li {{
-            margin: 8px 0;
-            color: #ecf0f1;
-        }}
-        #plotly-chart {{
-            background: rgba(255,255,255,0.02);
-            border-radius: 10px;
             padding: 10px;
+            background: rgba(0,0,0,0.2);
+            font-size: 0.85em;
+        }}
+        .legend-item {{ display: flex; align-items: center; gap: 5px; }}
+        .legend-color {{ width: 15px; height: 15px; border-radius: 3px; }}
+        #tree-container {{ width: 100%; height: calc(100vh - 200px); overflow: hidden; }}
+        .node circle {{ cursor: pointer; stroke-width: 2px; }}
+        .node text {{ font-size: 10px; fill: white; }}
+        .link {{ fill: none; stroke: #555; stroke-width: 1.5px; }}
+        .tooltip {{
+            position: absolute;
+            background: #1a1a2e;
+            border: 1px solid #3498db;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            z-index: 1000;
+        }}
+        .score-positive {{ color: #2ecc71; }}
+        .score-negative {{ color: #e74c3c; }}
+        .score-neutral {{ color: #f39c12; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Arvore Minimax - Visualizacao Colapsavel</h1>
+        <p>Clique nos nos para expandir/colapsar. Arraste para mover. Scroll para zoom.</p>
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value">{stats['total_nodes']:,}</div>
+                <div class="stat-label">Total de Nos</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{stats['leaf_nodes']:,}</div>
+                <div class="stat-label">Folhas</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{stats['max_depth']}</div>
+                <div class="stat-label">Profundidade</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{stats['root_score']}</div>
+                <div class="stat-label">Score Raiz</div>
+            </div>
+        </div>
+    </div>
+    <div class="controls">
+        <button class="btn-expand" onclick="expandAll()">Expandir Tudo</button>
+        <button class="btn-collapse" onclick="collapseAll()">Colapsar Tudo</button>
+        <button class="btn-reset" onclick="resetView()">Resetar Visao</button>
+    </div>
+    <div class="legend">
+        <div class="legend-item"><div class="legend-color" style="background: #3498db;"></div><span>MAX ({ai_symbol})</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #9b59b6;"></div><span>MIN ({opponent})</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #2ecc71;"></div><span>{ai_symbol} Vence</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #f39c12;"></div><span>Empate</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #e74c3c;"></div><span>{ai_symbol} Perde</span></div>
+    </div>
+    <div id="tree-container"></div>
+    <div class="tooltip" id="tooltip"></div>
+    <script>
+        const treeData = {tree_json};
+        const aiSymbol = '{ai_symbol}';
+        const container = document.getElementById('tree-container');
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        const svg = d3.select('#tree-container').append('svg').attr('width', width).attr('height', height);
+        const g = svg.append('g').attr('transform', `translate(${{width/2}}, 50)`);
+        const zoom = d3.zoom().scaleExtent([0.1, 4]).on('zoom', (e) => g.attr('transform', e.transform));
+        svg.call(zoom);
+        const tree = d3.tree().nodeSize([25, 80]);
+        const tooltip = d3.select('#tooltip');
+
+        function transformData(data) {{ return {{ data: data, children: data.children ? data.children.map(c => transformData(c)) : null }}; }}
+        let root = d3.hierarchy(transformData(treeData), d => d.children);
+        root.x0 = 0; root.y0 = 0;
+        root.descendants().forEach((d) => {{ if (d.depth > 2) {{ d._children = d.children; d.children = null; }} }});
+
+        function getNodeColor(d) {{
+            const data = d.data.data;
+            if (data.is_terminal) {{
+                if (data.result === 'WIN_' + aiSymbol) return '#2ecc71';
+                if (data.result === 'TIE') return '#f39c12';
+                return '#e74c3c';
+            }}
+            return data.is_max ? '#3498db' : '#9b59b6';
+        }}
+
+        function getNodeStroke(d) {{
+            const score = d.data.data.score || 0;
+            if (score > 0) return '#2ecc71';
+            if (score < 0) return '#e74c3c';
+            return '#f39c12';
+        }}
+
+        function boardToString(board) {{
+            let str = '';
+            for (let i = 0; i < 9; i++) {{
+                str += board[i] === ' ' ? '.' : board[i];
+                if (i % 3 === 2 && i < 8) str += '\\n';
+            }}
+            return str;
+        }}
+
+        function update(source) {{
+            const treeData = tree(root);
+            const nodes = treeData.descendants();
+            const links = treeData.links();
+            nodes.forEach(d => d.y = d.depth * 100);
+
+            const node = g.selectAll('.node').data(nodes, d => d.data.data.board.join(''));
+            const nodeEnter = node.enter().append('g').attr('class', 'node')
+                .attr('transform', d => `translate(${{source.x0 || 0}}, ${{source.y0 || 0}})`)
+                .on('click', (e, d) => {{
+                    if (d.children) {{ d._children = d.children; d.children = null; }}
+                    else if (d._children) {{ d.children = d._children; d._children = null; }}
+                    update(d);
+                }})
+                .on('mouseover', (e, d) => {{
+                    const data = d.data.data;
+                    const scoreClass = data.score > 0 ? 'score-positive' : data.score < 0 ? 'score-negative' : 'score-neutral';
+                    let resultText = data.is_terminal ? (data.result === 'WIN_X' ? 'X venceu!' : data.result === 'WIN_O' ? 'O venceu!' : 'Empate!') : '';
+                    const moveName = data.move !== null ? ['TL','TC','TR','ML','MC','MR','BL','BC','BR'][data.move] : 'Raiz';
+                    tooltip.html(`<div><strong>Profundidade:</strong> ${{data.depth}}</div>
+                        <div><strong>Jogador:</strong> ${{data.player}} (${{data.is_max ? 'MAX' : 'MIN'}})</div>
+                        <div><strong>Movimento:</strong> ${{moveName}}</div>
+                        <div class="${{scoreClass}}"><strong>Score:</strong> ${{data.score}}</div>
+                        ${{resultText ? '<div><strong>Resultado:</strong> ' + resultText + '</div>' : ''}}
+                        <div><strong>Filhos:</strong> ${{(d.children || d._children || []).length}}</div>
+                        <pre style="margin-top:8px">${{boardToString(data.board)}}</pre>`)
+                    .style('opacity', 1).style('left', (e.pageX + 15) + 'px').style('top', (e.pageY - 10) + 'px');
+                }})
+                .on('mouseout', () => tooltip.style('opacity', 0));
+
+            nodeEnter.append('circle').attr('r', 8).attr('fill', d => getNodeColor(d)).attr('stroke', d => getNodeStroke(d));
+            nodeEnter.append('text').attr('dy', 3).attr('text-anchor', 'middle')
+                .text(d => {{ const data = d.data.data; if (d._children) return '+'; if (!d.children && !d._children) return data.score; return ''; }});
+
+            const nodeUpdate = nodeEnter.merge(node);
+            nodeUpdate.transition().duration(300).attr('transform', d => `translate(${{d.x}}, ${{d.y}})`);
+            nodeUpdate.select('circle').attr('fill', d => getNodeColor(d));
+            nodeUpdate.select('text').text(d => {{ const data = d.data.data; if (d._children) return '+'; if (!d.children && !d._children) return data.score; return ''; }});
+            node.exit().transition().duration(300).attr('transform', d => `translate(${{source.x}}, ${{source.y}})`).remove();
+
+            const link = g.selectAll('.link').data(links, d => d.target.data.data.board.join(''));
+            const linkEnter = link.enter().insert('path', 'g').attr('class', 'link')
+                .attr('d', d => {{ const o = {{x: source.x0 || 0, y: source.y0 || 0}}; return diagonal(o, o); }});
+            linkEnter.merge(link).transition().duration(300).attr('d', d => diagonal(d.source, d.target));
+            link.exit().transition().duration(300).attr('d', d => {{ const o = {{x: source.x, y: source.y}}; return diagonal(o, o); }}).remove();
+            nodes.forEach(d => {{ d.x0 = d.x; d.y0 = d.y; }});
+        }}
+
+        function diagonal(s, d) {{ return `M${{s.x}},${{s.y}}C${{s.x}},${{(s.y + d.y) / 2}} ${{d.x}},${{(s.y + d.y) / 2}} ${{d.x}},${{d.y}}`; }}
+        function expandAll() {{ root.descendants().forEach(d => {{ if (d._children) {{ d.children = d._children; d._children = null; }} }}); update(root); }}
+        function collapseAll() {{ root.descendants().forEach(d => {{ if (d.children && d.depth > 0) {{ d._children = d.children; d.children = null; }} }}); update(root); }}
+        function resetView() {{ svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity.translate(width/2, 50)); }}
+
+        update(root);
+        resetView();
+    </script>
+</body>
+</html>'''
+
+    def _generate_sunburst_html(self, tree_data: Dict, stats: Dict) -> str:
+        """Generates HTML for sunburst visualization."""
+        tree_json = json.dumps(tree_data)
+        ai_symbol = self.ai_symbol
+        opponent = 'O' if ai_symbol == 'X' else 'X'
+
+        return f'''<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Arvore Minimax - Sunburst</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: white;
+            display: flex;
+            flex-direction: column;
+        }}
+        .header {{
+            padding: 20px;
+            text-align: center;
+            background: rgba(0,0,0,0.3);
+        }}
+        .header h1 {{ font-size: 1.8em; margin-bottom: 10px; }}
+        .stats {{ display: flex; justify-content: center; gap: 30px; margin-top: 15px; }}
+        .stat {{ text-align: center; }}
+        .stat-value {{ font-size: 1.5em; font-weight: bold; color: #3498db; }}
+        .stat-label {{ font-size: 0.85em; color: #95a5a6; }}
+        .legend {{
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            padding: 15px;
+            background: rgba(0,0,0,0.2);
+            font-size: 0.85em;
+        }}
+        .legend-item {{ display: flex; align-items: center; gap: 5px; }}
+        .legend-color {{ width: 15px; height: 15px; border-radius: 3px; }}
+        .breadcrumb {{ text-align: center; padding: 10px; background: rgba(0,0,0,0.2); font-size: 0.9em; }}
+        .container {{ flex: 1; display: flex; justify-content: center; align-items: center; padding: 20px; }}
+        #sunburst-container {{ position: relative; }}
+        .tooltip {{
+            position: absolute;
+            background: #1a1a2e;
+            border: 1px solid #3498db;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            z-index: 1000;
+        }}
+        .center-label {{
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            pointer-events: none;
+        }}
+        .center-label .depth {{ font-size: 2em; font-weight: bold; color: #3498db; }}
+        .center-label .label {{ font-size: 0.9em; color: #95a5a6; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Arvore Minimax - Sunburst</h1>
+        <p>Cada anel = um nivel. Clique para zoom. Centro = raiz.</p>
+        <div class="stats">
+            <div class="stat"><div class="stat-value">{stats['total_nodes']:,}</div><div class="stat-label">Total de Nos</div></div>
+            <div class="stat"><div class="stat-value">{stats['leaf_nodes']:,}</div><div class="stat-label">Folhas</div></div>
+            <div class="stat"><div class="stat-value">{stats['max_depth']}</div><div class="stat-label">Profundidade</div></div>
+        </div>
+    </div>
+    <div class="legend">
+        <div class="legend-item"><div class="legend-color" style="background: #3498db;"></div><span>MAX ({ai_symbol})</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #9b59b6;"></div><span>MIN ({opponent})</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #2ecc71;"></div><span>{ai_symbol} Vence</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #f39c12;"></div><span>Empate</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #e74c3c;"></div><span>{ai_symbol} Perde</span></div>
+    </div>
+    <div class="breadcrumb" id="breadcrumb">Raiz</div>
+    <div class="container">
+        <div id="sunburst-container">
+            <div class="center-label">
+                <div class="depth" id="center-depth">0</div>
+                <div class="label">Profundidade</div>
+            </div>
+        </div>
+    </div>
+    <div class="tooltip" id="tooltip"></div>
+    <script>
+        const treeData = {tree_json};
+        const aiSymbol = '{ai_symbol}';
+        const width = Math.min(window.innerWidth - 40, 700);
+        const height = width;
+        const radius = width / 2;
+
+        const svg = d3.select('#sunburst-container').append('svg').attr('width', width).attr('height', height)
+            .append('g').attr('transform', `translate(${{width/2}}, ${{height/2}})`);
+        const tooltip = d3.select('#tooltip');
+
+        function transformForHierarchy(data) {{
+            return {{ ...data, value: data.children && data.children.length > 0 ? undefined : 1,
+                children: data.children ? data.children.map(transformForHierarchy) : undefined }};
+        }}
+
+        const root = d3.hierarchy(transformForHierarchy(treeData)).sum(d => d.value || 0).sort((a, b) => (b.value || 0) - (a.value || 0));
+        const partition = d3.partition().size([2 * Math.PI, radius]);
+        partition(root);
+
+        const arc = d3.arc().startAngle(d => d.x0).endAngle(d => d.x1).innerRadius(d => d.y0).outerRadius(d => d.y1 - 1);
+
+        function getColor(d) {{
+            const data = d.data;
+            if (data.is_terminal) {{
+                if (data.result === 'WIN_' + aiSymbol) return '#2ecc71';
+                if (data.result === 'TIE') return '#f39c12';
+                return '#e74c3c';
+            }}
+            return data.is_max ? '#3498db' : '#9b59b6';
+        }}
+
+        function boardToString(board) {{
+            let str = '';
+            for (let i = 0; i < 9; i++) {{ str += board[i] === ' ' ? '.' : board[i]; if (i % 3 === 2 && i < 8) str += '\\n'; }}
+            return str;
+        }}
+
+        const paths = svg.selectAll('path').data(root.descendants().filter(d => d.depth > 0)).enter().append('path')
+            .attr('d', arc).attr('fill', d => getColor(d)).attr('stroke', '#1a1a2e').attr('stroke-width', 0.5)
+            .style('cursor', 'pointer').style('opacity', 0.85)
+            .on('mouseover', function(e, d) {{
+                d3.select(this).style('opacity', 1);
+                const data = d.data;
+                const scoreStyle = data.score > 0 ? 'color:#2ecc71' : data.score < 0 ? 'color:#e74c3c' : 'color:#f39c12';
+                let resultText = data.is_terminal ? (data.result === 'WIN_X' ? 'X venceu!' : data.result === 'WIN_O' ? 'O venceu!' : 'Empate!') : '';
+                const moveName = data.move !== null ? ['TL','TC','TR','ML','MC','MR','BL','BC','BR'][data.move] : 'Raiz';
+                tooltip.html(`<div><strong>Profundidade:</strong> ${{d.depth}}</div>
+                    <div><strong>Jogador:</strong> ${{data.player}} (${{data.is_max ? 'MAX' : 'MIN'}})</div>
+                    <div><strong>Movimento:</strong> ${{moveName}}</div>
+                    <div style="${{scoreStyle}}"><strong>Score:</strong> ${{data.score}}</div>
+                    ${{resultText ? '<div><strong>Resultado:</strong> ' + resultText + '</div>' : ''}}
+                    <pre style="margin-top:8px">${{boardToString(data.board)}}</pre>`)
+                .style('opacity', 1).style('left', (e.pageX + 15) + 'px').style('top', (e.pageY - 10) + 'px');
+            }})
+            .on('mouseout', function() {{ d3.select(this).style('opacity', 0.85); tooltip.style('opacity', 0); }})
+            .on('click', clicked);
+
+        svg.append('circle').attr('r', root.y1 - root.y0).attr('fill', '#1a1a2e').attr('stroke', '#3498db')
+            .attr('stroke-width', 2).style('cursor', 'pointer').on('click', () => clicked(null, root));
+
+        function clicked(e, p) {{
+            if (!p) p = root;
+            document.getElementById('center-depth').textContent = p.depth;
+            const ancestors = p.ancestors().reverse();
+            document.getElementById('breadcrumb').textContent = ancestors.map((d, i) =>
+                i === 0 ? 'Raiz' : (['TL','TC','TR','ML','MC','MR','BL','BC','BR'][d.data.move] || '?')).join(' > ');
+
+            root.each(d => {{
+                d.target = {{
+                    x0: Math.max(0, Math.min(1, (d.x0 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
+                    x1: Math.max(0, Math.min(1, (d.x1 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
+                    y0: Math.max(0, d.y0 - p.y0),
+                    y1: Math.max(0, d.y1 - p.y0)
+                }};
+            }});
+
+            const t = svg.transition().duration(750);
+            paths.transition(t).tween('data', d => {{ const i = d3.interpolate(d.current || d, d.target); return t => d.current = i(t); }})
+                .attrTween('d', d => () => arc(d.current));
+        }}
+
+        root.each(d => d.current = d);
+    </script>
+</body>
+</html>'''
+
+    def _generate_treemap_html(self, tree_data: Dict, stats: Dict) -> str:
+        """Generates HTML for treemap visualization."""
+        tree_json = json.dumps(tree_data)
+        ai_symbol = self.ai_symbol
+        opponent = 'O' if ai_symbol == 'X' else 'X'
+
+        return f'''<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Arvore Minimax - Treemap</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: white;
+        }}
+        .header {{
+            padding: 20px;
+            text-align: center;
+            background: rgba(0,0,0,0.3);
+        }}
+        .header h1 {{ font-size: 1.8em; margin-bottom: 10px; }}
+        .stats {{ display: flex; justify-content: center; gap: 30px; margin-top: 15px; }}
+        .stat {{ text-align: center; }}
+        .stat-value {{ font-size: 1.5em; font-weight: bold; color: #3498db; }}
+        .stat-label {{ font-size: 0.85em; color: #95a5a6; }}
+        .legend {{
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            padding: 15px;
+            background: rgba(0,0,0,0.2);
+            font-size: 0.85em;
+        }}
+        .legend-item {{ display: flex; align-items: center; gap: 5px; }}
+        .legend-color {{ width: 15px; height: 15px; border-radius: 3px; }}
+        .breadcrumb {{
+            text-align: center;
+            padding: 10px;
+            background: rgba(0,0,0,0.2);
+            font-size: 0.9em;
+        }}
+        .breadcrumb span {{ cursor: pointer; color: #3498db; }}
+        .breadcrumb span:hover {{ text-decoration: underline; }}
+        #treemap-container {{
+            width: 100%;
+            height: calc(100vh - 220px);
+            padding: 10px;
+            position: relative;
+        }}
+        .cell {{
+            position: absolute;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.1);
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }}
+        .cell:hover {{ border-color: white; z-index: 10; }}
+        .cell-label {{
+            padding: 4px;
+            font-size: 10px;
+            color: white;
+            text-shadow: 0 0 3px black;
+        }}
+        .tooltip {{
+            position: absolute;
+            background: #1a1a2e;
+            border: 1px solid #3498db;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            z-index: 1000;
         }}
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>Arvore de Busca Minimax</h1>
-        <p style="color: #bdc3c7; margin-top: 5px;">Passe o mouse sobre os nos para ver detalhes</p>
-    </div>
-
-    <div class="stats-container">
-        <div class="stat-box">
-            <div class="stat-number">{stats['total_nodes']}</div>
-            <div class="stat-label">Nos Avaliados</div>
-        </div>
-        <div class="stat-box">
-            <div class="stat-number">{stats.get('max_depth', 0)}</div>
-            <div class="stat-label">Profundidade Maxima</div>
-        </div>
-        <div class="stat-box">
-            <div class="stat-number">{stats.get('terminal_nodes', 0)}</div>
-            <div class="stat-label">Estados Terminais</div>
+        <h1>Arvore Minimax - Treemap</h1>
+        <p>Tamanho = numero de sub-nos. Clique para navegar.</p>
+        <div class="stats">
+            <div class="stat"><div class="stat-value">{stats['total_nodes']:,}</div><div class="stat-label">Total de Nos</div></div>
+            <div class="stat"><div class="stat-value">{stats['leaf_nodes']:,}</div><div class="stat-label">Folhas</div></div>
+            <div class="stat"><div class="stat-value">{stats['max_depth']}</div><div class="stat-label">Profundidade</div></div>
         </div>
     </div>
-
     <div class="legend">
-        <div class="legend-item">
-            <div class="legend-circle" style="background: #3498db;"></div>
-            <span>MAX (IA maximiza)</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-square" style="background: #e74c3c;"></div>
-            <span>MIN (Oponente minimiza)</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-diamond" style="background: #27ae60;"></div>
-            <span>Vitoria</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-diamond" style="background: #8e44ad;"></div>
-            <span>Derrota</span>
-        </div>
-        <div class="legend-item">
-            <div class="legend-diamond" style="background: #f39c12;"></div>
-            <span>Empate</span>
-        </div>
-        <div class="legend-item">
-            <div style="width: 30px; height: 4px; background: #2ecc71;"></div>
-            <span>Caminho Otimo</span>
-        </div>
+        <div class="legend-item"><div class="legend-color" style="background: #3498db;"></div><span>MAX ({ai_symbol})</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #9b59b6;"></div><span>MIN ({opponent})</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #2ecc71;"></div><span>{ai_symbol} Vence</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #f39c12;"></div><span>Empate</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #e74c3c;"></div><span>{ai_symbol} Perde</span></div>
     </div>
-
-    <div id="plotly-chart"></div>
-
-    <div class="info-panel">
-        <h3>Como funciona o Minimax?</h3>
-        <ul>
-            <li><strong>MAX (Azul):</strong> A IA tenta MAXIMIZAR seu score. Ela escolhe o movimento que leva ao maior valor possivel.</li>
-            <li><strong>MIN (Vermelho):</strong> O oponente tenta MINIMIZAR o score da IA. Ele escolhe o movimento que leva ao menor valor.</li>
-            <li><strong>Score +10:</strong> Vitoria da IA (quanto menor a profundidade, melhor - vitoria rapida)</li>
-            <li><strong>Score -10:</strong> Derrota da IA (quanto maior a profundidade, melhor - derrota lenta)</li>
-            <li><strong>Score 0:</strong> Empate - nenhum jogador vence</li>
-            <li><strong>Caminho Verde:</strong> O caminho otimo escolhido pela IA apos analisar todas as possibilidades</li>
-        </ul>
-    </div>
-
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <div class="breadcrumb" id="breadcrumb"><span onclick="zoomTo(root)">Raiz</span></div>
+    <div id="treemap-container"></div>
+    <div class="tooltip" id="tooltip"></div>
     <script>
-        var figData = {fig.to_json()};
-        Plotly.newPlot('plotly-chart', figData.data, figData.layout, {{responsive: true}});
+        const treeData = {tree_json};
+        const aiSymbol = '{ai_symbol}';
+        const container = document.getElementById('treemap-container');
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        const tooltip = d3.select('#tooltip');
+
+        function transformForHierarchy(data) {{
+            return {{ ...data, value: data.children && data.children.length > 0 ? undefined : 1,
+                children: data.children ? data.children.map(transformForHierarchy) : undefined }};
+        }}
+
+        const root = d3.hierarchy(transformForHierarchy(treeData)).sum(d => d.value || 0).sort((a, b) => (b.value || 0) - (a.value || 0));
+        const treemap = d3.treemap().size([width, height]).paddingOuter(3).paddingTop(19).paddingInner(1).round(true);
+        treemap(root);
+
+        function getColor(d) {{
+            const data = d.data;
+            if (data.is_terminal) {{
+                if (data.result === 'WIN_' + aiSymbol) return '#2ecc71';
+                if (data.result === 'TIE') return '#f39c12';
+                return '#e74c3c';
+            }}
+            return data.is_max ? '#3498db' : '#9b59b6';
+        }}
+
+        function boardToString(board) {{
+            let str = '';
+            for (let i = 0; i < 9; i++) {{ str += board[i] === ' ' ? '.' : board[i]; if (i % 3 === 2 && i < 8) str += '\\n'; }}
+            return str;
+        }}
+
+        let currentRoot = root;
+        const nodeMap = new Map();
+        root.descendants().forEach(d => nodeMap.set(d.data.board.join(''), d));
+
+        function render(focus) {{
+            container.innerHTML = '';
+            const nodes = focus.descendants().filter(d => d.depth <= focus.depth + 2);
+
+            nodes.forEach(d => {{
+                const div = document.createElement('div');
+                div.className = 'cell';
+                const fx0 = focus.x0, fx1 = focus.x1, fy0 = focus.y0, fy1 = focus.y1;
+                div.style.left = (d.x0 - fx0) / (fx1 - fx0) * width + 'px';
+                div.style.top = (d.y0 - fy0) / (fy1 - fy0) * height + 'px';
+                div.style.width = (d.x1 - d.x0) / (fx1 - fx0) * width + 'px';
+                div.style.height = (d.y1 - d.y0) / (fy1 - fy0) * height + 'px';
+                div.style.background = getColor(d);
+
+                const cellW = (d.x1 - d.x0) / (fx1 - fx0) * width;
+                const cellH = (d.y1 - d.y0) / (fy1 - fy0) * height;
+                if (cellW > 30 && cellH > 20) {{
+                    const label = document.createElement('div');
+                    label.className = 'cell-label';
+                    const moveName = d.data.move !== null ? ['TL','TC','TR','ML','MC','MR','BL','BC','BR'][d.data.move] : 'R';
+                    label.textContent = moveName + ' (' + d.data.score + ')';
+                    div.appendChild(label);
+                }}
+
+                div.addEventListener('click', (e) => {{ e.stopPropagation(); if (d.children) zoomTo(d); }});
+                div.addEventListener('mouseover', (e) => {{
+                    const data = d.data;
+                    const scoreStyle = data.score > 0 ? 'color:#2ecc71' : data.score < 0 ? 'color:#e74c3c' : 'color:#f39c12';
+                    let resultText = data.is_terminal ? (data.result === 'WIN_X' ? 'X venceu!' : data.result === 'WIN_O' ? 'O venceu!' : 'Empate!') : '';
+                    const moveName = data.move !== null ? ['TL','TC','TR','ML','MC','MR','BL','BC','BR'][data.move] : 'Raiz';
+                    tooltip.html(`<div><strong>Profundidade:</strong> ${{d.depth}}</div>
+                        <div><strong>Jogador:</strong> ${{data.player}} (${{data.is_max ? 'MAX' : 'MIN'}})</div>
+                        <div><strong>Movimento:</strong> ${{moveName}}</div>
+                        <div style="${{scoreStyle}}"><strong>Score:</strong> ${{data.score}}</div>
+                        ${{resultText ? '<div><strong>Resultado:</strong> ' + resultText + '</div>' : ''}}
+                        <div><strong>Sub-nos:</strong> ${{d.value}}</div>
+                        <pre style="margin-top:8px">${{boardToString(data.board)}}</pre>`)
+                    .style('opacity', 1).style('left', (e.pageX + 15) + 'px').style('top', (e.pageY - 10) + 'px');
+                }});
+                div.addEventListener('mouseout', () => tooltip.style('opacity', 0));
+                container.appendChild(div);
+            }});
+        }}
+
+        window.zoomTo = function(d) {{
+            currentRoot = d;
+            const ancestors = d.ancestors().reverse();
+            const bc = ancestors.map((a, i) => {{
+                const moveName = a.data.move !== null ? ['TL','TC','TR','ML','MC','MR','BL','BC','BR'][a.data.move] : 'Raiz';
+                const key = a.data.board.join('');
+                return `<span onclick="zoomTo(nodeMap.get('${{key}}'))">${{moveName}}</span>`;
+            }}).join(' > ');
+            document.getElementById('breadcrumb').innerHTML = bc;
+            treemap(root);
+            render(d);
+        }};
+
+        window.nodeMap = nodeMap;
+        render(root);
     </script>
 </body>
-</html>
-'''
-
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as f:
-            f.write(html_content)
-            webbrowser.open('file://' + f.name)
-
-    def save_html(self, filepath: str):
-        """
-        Saves the visualization as an HTML file.
-
-        Args:
-            filepath: Path to save the HTML file.
-        """
-        if not PLOTLY_AVAILABLE:
-            print("Plotly não está instalado. Execute: pip install plotly")
-            return
-
-        fig = self.generate_figure()
-        if fig is None:
-            print("Nenhum dado para visualizar.")
-            return
-
-        fig.write_html(filepath, include_plotlyjs='cdn')
-        print(f"Visualização salva em: {filepath}")
+</html>'''

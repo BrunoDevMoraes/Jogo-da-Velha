@@ -40,132 +40,135 @@ class GameVisualizer:
         html += '</div>'
         return html
 
-    def _get_decision_explanation(self, move: MoveAnalysis) -> str:
-        """Creates a detailed explanation of the Minimax decision process."""
-        player_type = "maximizador" if move.player == 'X' else "minimizador"
-        objective = "MAIOR" if move.player == 'X' else "MENOR"
+    def _get_move_analysis(self, move: MoveAnalysis) -> str:
+        """Creates a concise analysis specific to this move."""
+        opponent = 'O' if move.player == 'X' else 'X'
 
-        sorted_alts = sorted(
-            move.alternatives,
-            key=lambda x: x['score'],
-            reverse=(move.player == 'X')
-        )
+        sorted_alts = sorted(move.alternatives, key=lambda x: x['score'], reverse=True)
+        best_score = sorted_alts[0]['score'] if sorted_alts else 0
+        worst_score = sorted_alts[-1]['score'] if sorted_alts else 0
+        ties_count = len([a for a in sorted_alts if a['score'] == best_score])
 
-        best_alt = sorted_alts[0] if sorted_alts else None
-        worst_alt = sorted_alts[-1] if sorted_alts else None
+        # Determine outcome
+        if move.chosen_score > 0:
+            outcome = f"<span class='outcome-win'>Vitória de {move.player} garantida</span>"
+            outcome_detail = f"{move.player} vence em {10 - move.chosen_score} jogadas com jogo perfeito."
+        elif move.chosen_score == 0:
+            outcome = "<span class='outcome-tie'>Empate garantido</span>"
+            outcome_detail = "Nenhum jogador consegue vencer se ambos jogarem perfeitamente."
+        else:
+            outcome = f"<span class='outcome-lose'>Desvantagem para {move.player}</span>"
+            outcome_detail = f"{opponent} vence em {10 + move.chosen_score} jogadas se jogar perfeitamente."
 
-        explanation = f'''
-        <div class="decision-explanation">
-            <h4>🧠 Processo de Decisão do Minimax</h4>
+        # Why this move?
+        if ties_count > 1:
+            choice_reason = f"Havia {ties_count} jogadas com o mesmo score ({best_score}). A IA escolheu a primeira encontrada na ordem de varredura."
+        elif best_score == worst_score:
+            choice_reason = f"Todas as {len(sorted_alts)} opções levam ao mesmo resultado. Qualquer escolha é equivalente."
+        else:
+            choice_reason = f"Esta foi a única jogada com o melhor score possível ({move.chosen_score})."
 
-            <div class="step">
-                <span class="step-num">1</span>
-                <div class="step-content">
-                    <strong>Geração de Movimentos</strong>
-                    <p>A IA identificou <strong>{len(move.alternatives)}</strong> posições disponíveis para jogar.</p>
-                </div>
+        return f'''
+        <div class="move-analysis">
+            <div class="analysis-header">
+                <span class="analysis-title">Análise da Jogada</span>
+                <span class="analysis-stats">🔍 {move.nodes_evaluated:,} estados analisados em {move.time_ms:.1f}ms</span>
             </div>
 
-            <div class="step">
-                <span class="step-num">2</span>
-                <div class="step-content">
-                    <strong>Simulação Recursiva</strong>
-                    <p>Para cada posição, o algoritmo simulou <strong>todas as partidas possíveis</strong> até o final,
-                    avaliando <strong>{move.nodes_evaluated:,}</strong> estados do tabuleiro.</p>
+            <div class="analysis-result">
+                <div class="result-main">
+                    <span class="result-label">Resultado esperado:</span>
+                    {outcome}
                 </div>
+                <p class="result-detail">{outcome_detail}</p>
             </div>
 
-            <div class="step">
-                <span class="step-num">3</span>
-                <div class="step-content">
-                    <strong>Avaliação de Scores</strong>
-                    <p>Cada caminho recebeu uma pontuação:</p>
-                    <ul>
-                        <li><span class="score-tag positive">+10</span> Vitória da IA (ajustado pela profundidade)</li>
-                        <li><span class="score-tag negative">-10</span> Derrota da IA (ajustado pela profundidade)</li>
-                        <li><span class="score-tag neutral">0</span> Empate</li>
-                    </ul>
-                </div>
-            </div>
-
-            <div class="step">
-                <span class="step-num">4</span>
-                <div class="step-content">
-                    <strong>Seleção do Movimento ({player_type.upper()})</strong>
-                    <p>Como jogador <strong>{player_type}</strong>, a IA escolheu a jogada com o <strong>{objective}</strong> score.</p>
-                    {f'<p class="highlight-text">Melhor opção: <strong>{POSITION_NAMES.get(best_alt["position"], best_alt["position"])}</strong> com score <strong>{best_alt["score"]}</strong></p>' if best_alt else ''}
-                    {f'<p class="dim-text">Pior opção evitada: {POSITION_NAMES.get(worst_alt["position"], worst_alt["position"])} com score {worst_alt["score"]}</p>' if worst_alt and len(sorted_alts) > 1 else ''}
-                </div>
-            </div>
-
-            <div class="step">
-                <span class="step-num">5</span>
-                <div class="step-content">
-                    <strong>Tempo de Processamento</strong>
-                    <p>Todo este processo levou apenas <strong>{move.time_ms:.2f}ms</strong>!</p>
-                </div>
+            <div class="analysis-choice">
+                <p><strong>Por que {POSITION_NAMES.get(move.chosen_position, move.chosen_position)}?</strong></p>
+                <p>{choice_reason}</p>
             </div>
         </div>
         '''
-        return explanation
 
-    def _create_alternatives_html(self, move: MoveAnalysis) -> str:
-        """Creates HTML for the alternatives analysis."""
+    def _create_alternatives_board(self, move: MoveAnalysis) -> str:
+        """Creates a board-style visualization of all alternatives with hover details."""
         if not move.alternatives:
             return ""
 
-        html = '<div class="alternatives"><h4>📊 Alternativas Avaliadas:</h4><div class="alt-grid">'
+        opponent = 'O' if move.player == 'X' else 'X'
 
-        sorted_alts = sorted(
-            move.alternatives,
-            key=lambda x: x['score'],
-            reverse=(move.player == 'X')
-        )
+        # Create a map of position -> score
+        score_map = {alt['position']: alt['score'] for alt in move.alternatives}
 
-        for i, alt in enumerate(sorted_alts):
-            pos = alt['position']
-            score = alt['score']
-            is_chosen = pos == move.chosen_position
+        sorted_alts = sorted(move.alternatives, key=lambda x: x['score'], reverse=True)
+        best_score = sorted_alts[0]['score'] if sorted_alts else 0
+        worst_score = sorted_alts[-1]['score'] if sorted_alts else 0
 
-            score_class = "score-positive" if score > 0 else "score-negative" if score < 0 else "score-neutral"
-            chosen_class = " chosen" if is_chosen else ""
-            rank_class = "rank-best" if i == 0 else "rank-worst" if i == len(sorted_alts) - 1 else ""
-
-            rank_badge = ""
-            if i == 0:
-                rank_badge = '<span class="rank-badge best">MELHOR</span>'
-            elif i == len(sorted_alts) - 1 and len(sorted_alts) > 1:
-                rank_badge = '<span class="rank-badge worst">PIOR</span>'
-
-            html += f'''
-            <div class="alt-item{chosen_class} {rank_class}" title="Posição {pos}: Se jogar aqui, o melhor resultado possível leva ao score {score}">
-                <div class="alt-header">
-                    <div class="alt-pos">{POSITION_NAMES.get(pos, pos)}</div>
-                    {rank_badge}
-                </div>
-                <div class="alt-score {score_class}">Score: {score}</div>
-                <div class="alt-meaning">
-                    {self._get_score_meaning(score)}
-                </div>
-                {"<div class='chosen-badge'>✓ ESCOLHIDO</div>" if is_chosen else ""}
+        html = f'''
+        <div class="alternatives-board-section">
+            <h4>📊 Mapa de Scores - Passe o mouse para detalhes</h4>
+            <div class="board-legend">
+                <span><span class="legend-color positive"></span> {move.player} vence</span>
+                <span><span class="legend-color neutral"></span> Empate</span>
+                <span><span class="legend-color negative"></span> {opponent} vence</span>
             </div>
-            '''
+            <div class="alternatives-board">'''
+
+        for i in range(9):
+            cell_content = move.board_before[i]
+
+            if cell_content != ' ':
+                # Cell already occupied
+                cell_class = f"cell-occupied cell-{cell_content.lower()}"
+                html += f'<div class="alt-cell {cell_class}">{cell_content}</div>'
+            elif i in score_map:
+                score = score_map[i]
+                is_chosen = i == move.chosen_position
+
+                # Determine color class
+                if score > 0:
+                    color_class = "cell-positive"
+                    result_text = f"{move.player} vence em {10 - score} jogadas"
+                    rank_text = "Leva à vitória"
+                elif score == 0:
+                    color_class = "cell-neutral"
+                    result_text = "Empate garantido"
+                    rank_text = "Leva ao empate"
+                else:
+                    color_class = "cell-negative"
+                    result_text = f"{opponent} vence em {10 + score} jogadas"
+                    rank_text = "Leva à derrota"
+
+                # Determine if best/worst
+                if score == best_score:
+                    rank_class = "is-best"
+                    rank_label = "MELHOR OPÇÃO"
+                elif score == worst_score and best_score != worst_score:
+                    rank_class = "is-worst"
+                    rank_label = "PIOR OPÇÃO"
+                else:
+                    rank_class = ""
+                    rank_label = f"Opção #{sorted_alts.index({'position': i, 'score': score}) + 1}"
+
+                chosen_class = "is-chosen" if is_chosen else ""
+
+                html += f'''
+                <div class="alt-cell {color_class} {rank_class} {chosen_class}" data-pos="{i}">
+                    <span class="cell-score">{score}</span>
+                    {f'<span class="chosen-marker">✓</span>' if is_chosen else ''}
+                    <div class="cell-tooltip">
+                        <strong>{POSITION_NAMES.get(i, i)}</strong>
+                        <div class="tooltip-rank">{rank_label}</div>
+                        <div class="tooltip-result">{result_text}</div>
+                        <div class="tooltip-score">Score: {score}</div>
+                        {f'<div class="tooltip-chosen">← Jogada escolhida</div>' if is_chosen else ''}
+                    </div>
+                </div>'''
+            else:
+                html += '<div class="alt-cell cell-empty"></div>'
 
         html += '</div></div>'
         return html
-
-    def _get_score_meaning(self, score: int) -> str:
-        """Returns a human-readable meaning for a score."""
-        if score > 5:
-            return "Caminho para vitória rápida"
-        elif score > 0:
-            return "Caminho para vitória"
-        elif score == 0:
-            return "Caminho para empate"
-        elif score > -5:
-            return "Risco de derrota"
-        else:
-            return "Caminho para derrota"
 
     def show(self):
         """Opens the visualization in the browser."""
@@ -194,13 +197,12 @@ class GameVisualizer:
         for move in moves:
             player_class = "player-x" if move.player == 'X' else "player-o"
             player_icon = "🔵" if move.player == 'X' else "🔴"
-            player_role = "MAX (Maximizador)" if move.player == 'X' else "MIN (Minimizador)"
 
             moves_html += f'''
             <div class="move-card {player_class}">
                 <div class="move-header">
                     <span class="move-number">Jogada {move.move_number}</span>
-                    <span class="move-player">{player_icon} Jogador {move.player} - {player_role}</span>
+                    <span class="move-player">{player_icon} Jogador {move.player}</span>
                 </div>
 
                 <div class="move-content">
@@ -223,14 +225,11 @@ class GameVisualizer:
                     </div>
                 </div>
 
-                <div class="move-stats">
-                    <span title="Tempo que a IA levou para calcular">⏱️ {move.time_ms:.1f}ms</span>
-                    <span title="Quantidade de estados do tabuleiro analisados">🔍 {move.nodes_evaluated:,} nós avaliados</span>
-                </div>
+                {self._get_move_analysis(move)}
 
-                {self._get_decision_explanation(move)}
+                <div class="alternatives-section-label">Opções analisadas:</div>
 
-                {self._create_alternatives_html(move)}
+                {self._create_alternatives_board(move)}
 
                 {f'<div class="terminal-badge {result_class}">{result_text}</div>' if move.is_terminal else ''}
             </div>
@@ -560,106 +559,325 @@ class GameVisualizer:
             font-size: 0.85em !important;
         }}
 
-        /* Alternatives Styles */
-        .alternatives {{
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 1px solid rgba(255,255,255,0.1);
+        /* Minimax explanation section */
+        .minimax-explanation {{
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
         }}
 
-        .alternatives h4 {{
-            font-size: 0.95em;
-            color: #95a5a6;
-            margin-bottom: 12px;
+        .minimax-explanation h3 {{
+            color: #3498db;
+            margin-bottom: 20px;
         }}
 
-        .alt-grid {{
+        .explanation-content {{
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-            gap: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
         }}
 
-        .alt-item {{
-            background: rgba(0,0,0,0.2);
-            padding: 12px;
-            border-radius: 8px;
-            font-size: 0.85em;
-            position: relative;
-            cursor: help;
-            transition: transform 0.2s, background 0.2s;
-        }}
-
-        .alt-item:hover {{
-            transform: scale(1.02);
-            background: rgba(0,0,0,0.3);
-        }}
-
-        .alt-item.chosen {{
-            background: rgba(46, 204, 113, 0.2);
-            border: 2px solid #2ecc71;
-        }}
-
-        .alt-item.rank-best {{
-            border-top: 3px solid #2ecc71;
-        }}
-
-        .alt-item.rank-worst {{
-            border-top: 3px solid #e74c3c;
-            opacity: 0.7;
-        }}
-
-        .alt-header {{
+        .explanation-step {{
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 5px;
+            gap: 12px;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 15px;
+            border-radius: 8px;
         }}
 
-        .alt-pos {{
+        .step-number {{
+            background: #3498db;
+            color: white;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             font-weight: bold;
+            flex-shrink: 0;
+        }}
+
+        .step-text {{
+            font-size: 0.9em;
+            color: #bdc3c7;
+            line-height: 1.5;
+        }}
+
+        .step-text strong {{
             color: #ecf0f1;
         }}
 
-        .rank-badge {{
-            font-size: 0.65em;
-            padding: 2px 6px;
-            border-radius: 3px;
+        .score-pos {{ color: #2ecc71; font-weight: bold; }}
+        .score-neu {{ color: #f39c12; font-weight: bold; }}
+        .score-neg {{ color: #e74c3c; font-weight: bold; }}
+
+        .explanation-note {{
+            background: rgba(243, 156, 18, 0.15);
+            border-left: 4px solid #f39c12;
+            padding: 12px 15px;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.9em;
+            color: #bdc3c7;
+        }}
+
+        .section-title {{
+            color: #ecf0f1;
+            margin: 20px 0 15px 0;
+            padding-left: 30px;
+        }}
+
+        /* Move analysis styles */
+        .move-analysis {{
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+        }}
+
+        .analysis-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }}
+
+        .analysis-title {{
+            font-weight: bold;
+            color: #9b59b6;
+        }}
+
+        .analysis-stats {{
+            font-size: 0.85em;
+            color: #7f8c8d;
+        }}
+
+        .analysis-result {{
+            margin-bottom: 12px;
+        }}
+
+        .result-main {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }}
+
+        .result-label {{
+            color: #95a5a6;
+            font-size: 0.9em;
+        }}
+
+        .outcome-win {{
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+            padding: 4px 10px;
+            border-radius: 4px;
             font-weight: bold;
         }}
 
-        .rank-badge.best {{
+        .outcome-tie {{
+            background: rgba(243, 156, 18, 0.2);
+            color: #f39c12;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-weight: bold;
+        }}
+
+        .outcome-lose {{
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-weight: bold;
+        }}
+
+        .result-detail {{
+            font-size: 0.85em;
+            color: #95a5a6;
+            margin-top: 5px;
+        }}
+
+        .analysis-choice {{
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding-top: 12px;
+        }}
+
+        .analysis-choice p {{
+            font-size: 0.9em;
+            color: #bdc3c7;
+            margin: 5px 0;
+        }}
+
+        /* Alternatives board styles */
+        .alternatives-board-section {{
+            margin-top: 15px;
+        }}
+
+        .alternatives-board-section h4 {{
+            color: #95a5a6;
+            font-size: 0.95em;
+            margin-bottom: 10px;
+        }}
+
+        .board-legend {{
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+            font-size: 0.8em;
+            color: #95a5a6;
+        }}
+
+        .legend-color {{
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+            margin-right: 6px;
+            vertical-align: middle;
+        }}
+
+        .legend-color.positive {{ background: rgba(46, 204, 113, 0.6); }}
+        .legend-color.neutral {{ background: rgba(243, 156, 18, 0.6); }}
+        .legend-color.negative {{ background: rgba(231, 76, 60, 0.6); }}
+
+        .alternatives-board {{
+            display: grid;
+            grid-template-columns: repeat(3, 70px);
+            gap: 5px;
+            background: #2c3e50;
+            padding: 8px;
+            border-radius: 10px;
+            width: fit-content;
+        }}
+
+        .alt-cell {{
+            width: 70px;
+            height: 70px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            position: relative;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }}
+
+        .alt-cell:hover {{
+            transform: scale(1.05);
+            z-index: 10;
+        }}
+
+        .alt-cell.cell-occupied {{
+            background: #34495e;
+            cursor: default;
+        }}
+
+        .alt-cell.cell-occupied:hover {{
+            transform: none;
+        }}
+
+        .alt-cell.cell-x {{ color: #3498db; font-size: 1.5em; font-weight: bold; }}
+        .alt-cell.cell-o {{ color: #e74c3c; font-size: 1.5em; font-weight: bold; }}
+
+        .alt-cell.cell-positive {{ background: rgba(46, 204, 113, 0.4); }}
+        .alt-cell.cell-neutral {{ background: rgba(243, 156, 18, 0.4); }}
+        .alt-cell.cell-negative {{ background: rgba(231, 76, 60, 0.4); }}
+
+        .alt-cell.is-best {{ box-shadow: 0 0 0 3px #2ecc71; }}
+        .alt-cell.is-worst {{ box-shadow: 0 0 0 3px #e74c3c; opacity: 0.7; }}
+        .alt-cell.is-chosen {{ box-shadow: 0 0 0 3px #3498db, inset 0 0 10px rgba(52, 152, 219, 0.5); }}
+
+        .cell-score {{
+            font-size: 1.2em;
+            font-weight: bold;
+            color: white;
+        }}
+
+        .chosen-marker {{
+            position: absolute;
+            top: 3px;
+            right: 5px;
+            font-size: 0.8em;
+            color: #3498db;
+        }}
+
+        .cell-tooltip {{
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1a1a2e;
+            border: 1px solid #3498db;
+            border-radius: 8px;
+            padding: 12px;
+            min-width: 180px;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s, visibility 0.2s;
+            z-index: 100;
+            pointer-events: none;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.5);
+        }}
+
+        .alt-cell:hover .cell-tooltip {{
+            opacity: 1;
+            visibility: visible;
+        }}
+
+        .cell-tooltip strong {{
+            display: block;
+            color: #ecf0f1;
+            margin-bottom: 8px;
+            font-size: 0.95em;
+        }}
+
+        .tooltip-rank {{
+            font-size: 0.8em;
+            padding: 3px 8px;
+            border-radius: 3px;
+            display: inline-block;
+            margin-bottom: 8px;
+        }}
+
+        .is-best .tooltip-rank {{
             background: #2ecc71;
             color: white;
         }}
 
-        .rank-badge.worst {{
+        .is-worst .tooltip-rank {{
             background: #e74c3c;
             color: white;
         }}
 
-        .alt-score {{
-            font-size: 0.9em;
-            margin: 5px 0;
+        .tooltip-result {{
+            font-size: 0.85em;
+            color: #bdc3c7;
+            margin-bottom: 5px;
         }}
 
-        .score-positive {{ color: #2ecc71; }}
-        .score-negative {{ color: #e74c3c; }}
-        .score-neutral {{ color: #f39c12; }}
-
-        .alt-meaning {{
-            font-size: 0.75em;
-            color: #7f8c8d;
-            font-style: italic;
+        .tooltip-score {{
+            font-size: 0.85em;
+            color: #95a5a6;
         }}
 
-        .chosen-badge {{
-            font-size: 0.7em;
-            background: #2ecc71;
-            color: white;
-            padding: 3px 8px;
-            border-radius: 4px;
+        .tooltip-chosen {{
+            font-size: 0.8em;
+            color: #3498db;
             margin-top: 8px;
-            display: inline-block;
+            font-weight: bold;
+        }}
+
+        .alternatives-section-label {{
+            color: #95a5a6;
+            font-size: 0.9em;
+            margin-top: 15px;
+            margin-bottom: 10px;
         }}
 
         .terminal-badge {{
@@ -776,51 +994,73 @@ class GameVisualizer:
             </div>
         </div>
 
+        <!-- Explicação do Minimax (uma vez só, no início) -->
+        <div class="minimax-explanation">
+            <h3>📚 Como funciona o Minimax?</h3>
+
+            <div class="explanation-content">
+                <div class="explanation-step">
+                    <div class="step-number">1</div>
+                    <div class="step-text">
+                        <strong>Simulação completa:</strong> Para cada casa vazia, a IA simula todas as partidas possíveis até o final (vitória, derrota ou empate).
+                    </div>
+                </div>
+
+                <div class="explanation-step">
+                    <div class="step-number">2</div>
+                    <div class="step-text">
+                        <strong>Oponente inteligente:</strong> Durante a simulação, assume que o oponente sempre faz a melhor jogada possível.
+                    </div>
+                </div>
+
+                <div class="explanation-step">
+                    <div class="step-number">3</div>
+                    <div class="step-text">
+                        <strong>Pontuação:</strong> Cada resultado recebe um score: <span class="score-pos">+10</span> (vitória),
+                        <span class="score-neu">0</span> (empate), <span class="score-neg">-10</span> (derrota).
+                        O score é ajustado pela profundidade (vitória rápida vale mais).
+                    </div>
+                </div>
+
+                <div class="explanation-step">
+                    <div class="step-number">4</div>
+                    <div class="step-text">
+                        <strong>Escolha:</strong> A IA escolhe a jogada com o <strong>maior score</strong> do seu ponto de vista.
+                    </div>
+                </div>
+            </div>
+
+            <div class="explanation-note">
+                <strong>Importante:</strong> Cada jogador (X e O) é maximizador da sua própria vitória.
+                Quando X joga, +10 = X vence. Quando O joga, +10 = O vence.
+            </div>
+        </div>
+
+        <h3 class="section-title">🎯 Histórico de Jogadas</h3>
+
         <div class="timeline">
             {moves_html}
         </div>
 
         <div class="info-section">
-            <h3>📚 Como funciona o Algoritmo Minimax?</h3>
+            <h3>📖 Resumo do Algoritmo</h3>
             <div class="info-grid">
                 <div class="info-card">
-                    <h4>🎯 O que é o Minimax?</h4>
-                    <p>O Minimax é um algoritmo de busca em árvore usado em jogos de dois jogadores.
-                    Ele simula todas as jogadas possíveis até o final do jogo para encontrar o movimento ótimo.</p>
+                    <h4>🔄 Por que "Minimax"?</h4>
+                    <p>O nome vem da alternância: nos níveis do jogador atual, escolhe o <strong>máximo</strong>;
+                    nos níveis do oponente, escolhe o <strong>mínimo</strong> (simula o oponente jogando contra você).</p>
                 </div>
 
                 <div class="info-card">
-                    <h4>🔵 Jogador MAX (X)</h4>
-                    <p>O jogador X é o <strong>maximizador</strong>. Ele sempre escolhe o movimento
-                    que leva ao <strong>maior</strong> score possível, buscando a vitória.</p>
+                    <h4>⚡ Eficiência</h4>
+                    <p>O Jogo da Velha tem ~362.880 estados máximos. A primeira jogada analisa ~549.000 estados,
+                    mas as últimas analisam apenas dezenas (menos casas vazias = menos simulações).</p>
                 </div>
 
                 <div class="info-card">
-                    <h4>🔴 Jogador MIN (O)</h4>
-                    <p>O jogador O é o <strong>minimizador</strong>. Ele sempre escolhe o movimento
-                    que leva ao <strong>menor</strong> score, tentando impedir a vitória do oponente.</p>
-                </div>
-
-                <div class="info-card">
-                    <h4>📊 Sistema de Pontuação</h4>
-                    <ul>
-                        <li><strong>+10:</strong> Vitória do X (MAX)</li>
-                        <li><strong>-10:</strong> Vitória do O (MIN)</li>
-                        <li><strong>0:</strong> Empate</li>
-                        <li><strong>Ajuste de profundidade:</strong> Vitórias rápidas valem mais!</li>
-                    </ul>
-                </div>
-
-                <div class="info-card">
-                    <h4>⚡ Por que é eficiente?</h4>
-                    <p>Apesar de avaliar milhares de possibilidades, o algoritmo é muito rápido
-                    (milissegundos) porque o Jogo da Velha tem um espaço de estados limitado.</p>
-                </div>
-
-                <div class="info-card">
-                    <h4>🏆 Resultado Garantido</h4>
-                    <p>Com dois jogadores usando Minimax perfeitamente, o jogo <strong>sempre termina em empate</strong>.
-                    É impossível vencer uma IA com Minimax se você também jogar perfeitamente!</p>
+                    <h4>🏆 Resultado</h4>
+                    <p>Com duas IAs Minimax perfeitas, o jogo <strong>sempre termina em empate</strong>.
+                    É matematicamente impossível vencer uma IA Minimax se você também jogar perfeitamente.</p>
                 </div>
             </div>
         </div>
