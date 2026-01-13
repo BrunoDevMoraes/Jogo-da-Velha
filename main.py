@@ -1,10 +1,12 @@
-import tkinter as tk
+"""Entry point for the Tic-Tac-Toe application."""
+
+import customtkinter as ctk
 from gui.game_gui import GameGUI
 
 
 def main():
     """Entry point for the Tic-Tac-Toe application."""
-    root = tk.Tk()
+    root = ctk.CTk()
     GameGUI(root)
     root.mainloop()
 

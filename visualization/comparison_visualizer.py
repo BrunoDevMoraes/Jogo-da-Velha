@@ -15,6 +15,7 @@ from ai.alpha_beta_player import AlphaBetaPlayer
 from ai.alpha_beta_tt_player import AlphaBetaTTPlayer
 from ai.alpha_beta_symmetry_player import AlphaBetaSymmetryPlayer
 from ai.negascout_player import NegaScoutPlayer
+from ai.random_player import RandomPlayer
 from utils.constants import PLAYER_X, PLAYER_O
 
 
@@ -43,6 +44,10 @@ class MatchResult:
     total_nodes_x: int
     total_nodes_o: int
     total_time_ms: float
+    time_x_ms: float
+    time_o_ms: float
+    memory_x_kb: float
+    memory_o_kb: float
     final_board: List[str]
     move_history: List[Dict]
 
@@ -196,28 +201,47 @@ class ComparisonVisualizer:
         ('NegaScout', NegaScoutPlayer, None),
     ]
 
+    # Algorithms for tournament (includes Random for varied game lengths)
+    TOURNAMENT_ALGORITHMS = [
+        ('Minimax', MinimaxPlayer),
+        ('Alpha-Beta', AlphaBetaPlayer),
+        ('AB + Transposition', AlphaBetaTTPlayer),
+        ('AB + Simetria', AlphaBetaSymmetryPlayer),
+        ('NegaScout', NegaScoutPlayer),
+        ('Random', RandomPlayer),
+    ]
+
     COLORS = {
         'Minimax': '#e74c3c',
         'Alpha-Beta': '#3498db',
         'AB + Transposition': '#9b59b6',
         'AB + Simetria': '#2ecc71',
         'NegaScout': '#f39c12',
+        'Random': '#95a5a6',
     }
 
     def __init__(self):
         self.results: List[BenchmarkResult] = []
         self.tournament_results: List[MatchResult] = []
 
-    def run_tournament(self):
-        """Runs a round-robin tournament between all algorithms."""
-        self.tournament_results = []
-        algo_classes = [(name, cls) for name, cls, _ in self.ALGORITHMS]
+    def run_tournament(self, num_games_per_matchup: int = 3):
+        """Runs a round-robin tournament between all algorithms.
 
-        for i, (name_x, class_x) in enumerate(algo_classes):
-            for j, (name_o, class_o) in enumerate(algo_classes):
+        Args:
+            num_games_per_matchup: Number of games per matchup (for Random variance).
+        """
+        self.tournament_results = []
+
+        for i, (name_x, class_x) in enumerate(self.TOURNAMENT_ALGORITHMS):
+            for j, (name_o, class_o) in enumerate(self.TOURNAMENT_ALGORITHMS):
                 if i != j:
-                    result = self._play_match(name_x, class_x, name_o, class_o)
-                    self.tournament_results.append(result)
+                    # Play multiple games if Random is involved for statistical variance
+                    has_random = 'Random' in name_x or 'Random' in name_o
+                    games_to_play = num_games_per_matchup if has_random else 1
+
+                    for _ in range(games_to_play):
+                        result = self._play_match(name_x, class_x, name_o, class_o)
+                        self.tournament_results.append(result)
 
     def _play_match(
         self,
@@ -234,30 +258,52 @@ class ComparisonVisualizer:
         move_history = []
         total_nodes_x = 0
         total_nodes_o = 0
+        time_x_ms = 0
+        time_o_ms = 0
+        memory_x_kb = 0
+        memory_o_kb = 0
         start_time = time.perf_counter()
         current_player = PLAYER_X
 
         while not GameLogic.is_terminal(board):
             if current_player == PLAYER_X:
+                tracemalloc.start()
+                move_start = time.perf_counter()
                 move, stats = player_x.get_move(board)
+                move_time = (time.perf_counter() - move_start) * 1000
+                _, peak = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+
+                time_x_ms += move_time
+                memory_x_kb = max(memory_x_kb, peak / 1024)
                 total_nodes_x += stats['nodes_evaluated']
                 board.make_move(move, PLAYER_X)
                 move_history.append({
                     'player': name_x,
                     'symbol': 'X',
                     'move': move,
-                    'nodes': stats['nodes_evaluated']
+                    'nodes': stats['nodes_evaluated'],
+                    'time_ms': move_time
                 })
                 current_player = PLAYER_O
             else:
+                tracemalloc.start()
+                move_start = time.perf_counter()
                 move, stats = player_o.get_move(board)
+                move_time = (time.perf_counter() - move_start) * 1000
+                _, peak = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+
+                time_o_ms += move_time
+                memory_o_kb = max(memory_o_kb, peak / 1024)
                 total_nodes_o += stats['nodes_evaluated']
                 board.make_move(move, PLAYER_O)
                 move_history.append({
                     'player': name_o,
                     'symbol': 'O',
                     'move': move,
-                    'nodes': stats['nodes_evaluated']
+                    'nodes': stats['nodes_evaluated'],
+                    'time_ms': move_time
                 })
                 current_player = PLAYER_X
 
@@ -272,6 +318,10 @@ class ComparisonVisualizer:
             total_nodes_x=total_nodes_x,
             total_nodes_o=total_nodes_o,
             total_time_ms=total_time,
+            time_x_ms=time_x_ms,
+            time_o_ms=time_o_ms,
+            memory_x_kb=memory_x_kb,
+            memory_o_kb=memory_o_kb,
             final_board=board.cells.copy(),
             move_history=move_history
         )
@@ -320,10 +370,10 @@ class ComparisonVisualizer:
             result_type = 'WIN'
         elif score < -5:
             result_type = 'LOSS'
-        elif score == 0:
-            result_type = 'TIE' if depth_limit is None else 'UNKNOWN'
+        elif score == 0 and depth_limit is None:
+            result_type = 'TIE'
         else:
-            result_type = 'UNKNOWN'
+            result_type = 'TIE'
 
         max_depth_reached = stats.get('max_depth_reached', depth_limit or 9)
 
@@ -370,13 +420,321 @@ class ComparisonVisualizer:
         html = self._generate_html_header()
         html += self._generate_summary_section(unlimited_results, baseline_nodes)
         html += self._generate_unlimited_comparison(unlimited_results, baseline_nodes)
+        html += self._generate_memory_comparison(unlimited_results)
+        html += self._generate_recommendation_section(unlimited_results, baseline_nodes)
         html += self._generate_tournament_section()
-        html += self._generate_depth_analysis(depth_results, baseline_nodes)
+        html += self._generate_custom_comparison_section()
+        html += self._generate_depth_analysis(depth_results)
         html += self._generate_charts_section(unlimited_results, depth_results)
         html += self._generate_methodology_section()
         html += self._generate_html_footer()
 
         return html
+
+    def _generate_memory_comparison(self, results: List[BenchmarkResult]) -> str:
+        """Generates the memory comparison section."""
+        sorted_by_memory = sorted(results, key=lambda r: r.memory_kb)
+
+        rows = ''
+        for r in sorted_by_memory:
+            color = self.COLORS.get(r.algorithm, '#666')
+            bar_width = min((r.memory_kb / max(rr.memory_kb for rr in results)) * 150, 150) if results else 0
+
+            rows += f'''
+            <tr>
+                <td>
+                    <div class="algo-name">
+                        <div class="algo-dot" style="background: {color}"></div>
+                        {r.algorithm}
+                    </div>
+                </td>
+                <td>
+                    <div class="memory-bar">
+                        <div class="bar" style="width: {bar_width}px; background: {color};"></div>
+                        <span>{r.memory_kb:.1f} KB</span>
+                    </div>
+                </td>
+                <td>{r.nodes_evaluated:,}</td>
+                <td>{r.memory_kb / r.nodes_evaluated * 1000:.4f} bytes/no</td>
+            </tr>
+'''
+
+        return f'''
+        <div class="section">
+            <h2>Comparacao de Memoria</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                Memoria de pico utilizada por cada algoritmo durante a busca.
+                Valores menores indicam maior eficiencia de memoria.
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Algoritmo</th>
+                        <th>Memoria de Pico</th>
+                        <th>Nos Avaliados</th>
+                        <th>Eficiencia (bytes/no)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows}
+                </tbody>
+            </table>
+        </div>
+'''
+
+    def _generate_recommendation_section(self, results: List[BenchmarkResult], baseline: int) -> str:
+        """Generates the algorithm recommendation section based on priorities."""
+        best_speed = min(results, key=lambda r: r.time_ms)
+        best_memory = min(results, key=lambda r: r.memory_kb if r.memory_kb > 0 else float('inf'))
+        best_nodes = min(results, key=lambda r: r.nodes_evaluated)
+
+        # Calculate scores for balanced recommendation
+        recommendations = []
+        for r in results:
+            # Normalize scores (lower is better)
+            time_score = r.time_ms / best_speed.time_ms if best_speed.time_ms > 0 else 1
+            memory_score = r.memory_kb / best_memory.memory_kb if best_memory.memory_kb > 0 else 1
+            nodes_score = r.nodes_evaluated / best_nodes.nodes_evaluated if best_nodes.nodes_evaluated > 0 else 1
+
+            recommendations.append({
+                'algorithm': r.algorithm,
+                'time_score': time_score,
+                'memory_score': memory_score,
+                'nodes_score': nodes_score,
+                'balanced_score': (time_score + memory_score + nodes_score) / 3,
+                'result': r
+            })
+
+        return f'''
+        <div class="section">
+            <h2>Recomendacao de Algoritmo</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+                Escolha o algoritmo ideal baseado na sua prioridade principal.
+            </p>
+
+            <div class="recommendation-grid">
+                <div class="recommendation-card speed">
+                    <div class="rec-icon">⚡</div>
+                    <h3>Prioridade: Velocidade</h3>
+                    <div class="rec-algorithm">{best_speed.algorithm}</div>
+                    <div class="rec-detail">{best_speed.time_ms:.2f}ms de execucao</div>
+                    <p class="rec-description">
+                        Ideal para aplicacoes em tempo real onde latencia e critica.
+                        Melhor escolha para jogos com limite de tempo.
+                    </p>
+                </div>
+
+                <div class="recommendation-card memory">
+                    <div class="rec-icon">💾</div>
+                    <h3>Prioridade: Memoria</h3>
+                    <div class="rec-algorithm">{best_memory.algorithm}</div>
+                    <div class="rec-detail">{best_memory.memory_kb:.1f} KB utilizados</div>
+                    <p class="rec-description">
+                        Ideal para dispositivos com memoria limitada.
+                        Melhor escolha para sistemas embarcados ou mobile.
+                    </p>
+                </div>
+
+                <div class="recommendation-card efficiency">
+                    <div class="rec-icon">🎯</div>
+                    <h3>Prioridade: Eficiencia</h3>
+                    <div class="rec-algorithm">{best_nodes.algorithm}</div>
+                    <div class="rec-detail">{best_nodes.nodes_evaluated:,} nos avaliados</div>
+                    <p class="rec-description">
+                        Menor numero de estados explorados.
+                        Melhor escolha para problemas maiores onde cada no custa caro.
+                    </p>
+                </div>
+
+                <div class="recommendation-card balanced">
+                    <div class="rec-icon">⚖️</div>
+                    <h3>Prioridade: Equilibrio</h3>
+                    <div class="rec-algorithm">{min(recommendations, key=lambda x: x['balanced_score'])['algorithm']}</div>
+                    <div class="rec-detail">Melhor balanco geral</div>
+                    <p class="rec-description">
+                        Bom desempenho em todas as metricas.
+                        Melhor escolha para uso geral sem requisitos especificos.
+                    </p>
+                </div>
+            </div>
+
+            <div class="priority-selector" style="margin-top: 2rem;">
+                <h4 style="color: var(--accent-blue); margin-bottom: 1rem;">Comparador Interativo</h4>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">
+                    Ajuste os pesos para ver qual algoritmo melhor atende suas necessidades:
+                </p>
+                <div class="slider-group">
+                    <label>Velocidade: <span id="speed-val">33%</span></label>
+                    <input type="range" id="speed-weight" min="0" max="100" value="33" oninput="updateRecommendation()">
+                </div>
+                <div class="slider-group">
+                    <label>Memoria: <span id="memory-val">33%</span></label>
+                    <input type="range" id="memory-weight" min="0" max="100" value="33" oninput="updateRecommendation()">
+                </div>
+                <div class="slider-group">
+                    <label>Eficiencia: <span id="efficiency-val">34%</span></label>
+                    <input type="range" id="efficiency-weight" min="0" max="100" value="34" oninput="updateRecommendation()">
+                </div>
+                <div id="custom-recommendation" class="custom-rec-result">
+                    <strong>Recomendacao:</strong> <span id="rec-result">Calculando...</span>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const algoData = {repr([{'name': r.algorithm, 'time': r.time_ms, 'memory': r.memory_kb, 'nodes': r.nodes_evaluated} for r in results])};
+
+            function updateRecommendation() {{
+                const speedW = parseInt(document.getElementById('speed-weight').value);
+                const memoryW = parseInt(document.getElementById('memory-weight').value);
+                const efficiencyW = parseInt(document.getElementById('efficiency-weight').value);
+                const total = speedW + memoryW + efficiencyW;
+
+                document.getElementById('speed-val').textContent = Math.round(speedW/total*100) + '%';
+                document.getElementById('memory-val').textContent = Math.round(memoryW/total*100) + '%';
+                document.getElementById('efficiency-val').textContent = Math.round(efficiencyW/total*100) + '%';
+
+                const minTime = Math.min(...algoData.map(a => a.time));
+                const minMemory = Math.min(...algoData.map(a => a.memory));
+                const minNodes = Math.min(...algoData.map(a => a.nodes));
+
+                let best = null;
+                let bestScore = Infinity;
+
+                algoData.forEach(algo => {{
+                    const score = (speedW/total) * (algo.time/minTime) +
+                                  (memoryW/total) * (algo.memory/minMemory) +
+                                  (efficiencyW/total) * (algo.nodes/minNodes);
+                    if (score < bestScore) {{
+                        bestScore = score;
+                        best = algo.name;
+                    }}
+                }});
+
+                document.getElementById('rec-result').textContent = best;
+            }}
+
+            updateRecommendation();
+        </script>
+'''
+
+    def _generate_custom_comparison_section(self) -> str:
+        """Generates the custom algorithm pair comparison section."""
+        algo_names = [name for name, _, _ in self.ALGORITHMS]
+        options = ''.join([f'<option value="{name}">{name}</option>' for name in algo_names])
+
+        # Pre-generate all match data for JavaScript
+        match_data = {}
+        for m in self.tournament_results:
+            key = f"{m.player_x}_vs_{m.player_o}"
+            match_data[key] = {
+                'player_x': m.player_x,
+                'player_o': m.player_o,
+                'winner': m.winner,
+                'moves_count': m.moves_count,
+                'total_time_ms': round(m.total_time_ms, 2),
+                'time_x_ms': round(m.time_x_ms, 2),
+                'time_o_ms': round(m.time_o_ms, 2),
+                'nodes_x': m.total_nodes_x,
+                'nodes_o': m.total_nodes_o,
+                'memory_x_kb': round(m.memory_x_kb, 2),
+                'memory_o_kb': round(m.memory_o_kb, 2),
+                'final_board': m.final_board
+            }
+
+        return f'''
+        <div class="section">
+            <h2>Comparacao Personalizada</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+                Selecione dois algoritmos para comparar diretamente seus resultados em uma partida.
+            </p>
+
+            <div class="custom-comparison-controls">
+                <div class="algo-selector">
+                    <label>Jogador X:</label>
+                    <select id="algo-x" onchange="updateComparison()">
+                        {options}
+                    </select>
+                </div>
+                <div class="vs-label">VS</div>
+                <div class="algo-selector">
+                    <label>Jogador O:</label>
+                    <select id="algo-o" onchange="updateComparison()">
+                        {options.replace('value="Minimax"', 'value="Alpha-Beta" selected').replace('value="Alpha-Beta"', 'value="Minimax"', 1)}
+                    </select>
+                </div>
+            </div>
+
+            <div id="comparison-result" class="comparison-result">
+                <p>Selecione algoritmos diferentes para ver a comparacao.</p>
+            </div>
+        </div>
+
+        <script>
+            const matchData = {repr(match_data).replace("'", '"').replace('None', 'null')};
+
+            function updateComparison() {{
+                const algoX = document.getElementById('algo-x').value;
+                const algoO = document.getElementById('algo-o').value;
+                const resultDiv = document.getElementById('comparison-result');
+
+                if (algoX === algoO) {{
+                    resultDiv.innerHTML = '<p style="color: var(--accent-orange);">Selecione algoritmos diferentes para comparar.</p>';
+                    return;
+                }}
+
+                const key = algoX + '_vs_' + algoO;
+                const match = matchData[key];
+
+                if (!match) {{
+                    resultDiv.innerHTML = '<p style="color: var(--accent-red);">Dados nao encontrados para esta combinacao.</p>';
+                    return;
+                }}
+
+                const winnerText = match.winner === 'X' ? algoX + ' (X) venceu!'
+                                 : match.winner === 'O' ? algoO + ' (O) venceu!'
+                                 : 'Empate!';
+                const winnerClass = match.winner === 'X' ? 'win-x' : match.winner === 'O' ? 'win-o' : 'tie';
+
+                let boardHtml = '<div class="mini-board">';
+                for (let i = 0; i < 9; i++) {{
+                    const cell = match.final_board[i];
+                    const cellClass = cell === 'X' ? 'cell-x' : cell === 'O' ? 'cell-o' : 'cell-empty';
+                    boardHtml += '<div class="mini-cell ' + cellClass + '">' + (cell !== ' ' ? cell : '') + '</div>';
+                }}
+                boardHtml += '</div>';
+
+                resultDiv.innerHTML = `
+                    <div class="match-result-detail ${{winnerClass}}">
+                        <h3>${{winnerText}}</h3>
+                        ${{boardHtml}}
+                    </div>
+                    <div class="comparison-stats">
+                        <div class="stat-column">
+                            <h4>${{algoX}} (X)</h4>
+                            <div class="stat-item"><span>Tempo:</span> <strong>${{match.time_x_ms}}ms</strong></div>
+                            <div class="stat-item"><span>Nos:</span> <strong>${{match.nodes_x.toLocaleString()}}</strong></div>
+                            <div class="stat-item"><span>Memoria:</span> <strong>${{match.memory_x_kb}}KB</strong></div>
+                        </div>
+                        <div class="stat-column">
+                            <h4>${{algoO}} (O)</h4>
+                            <div class="stat-item"><span>Tempo:</span> <strong>${{match.time_o_ms}}ms</strong></div>
+                            <div class="stat-item"><span>Nos:</span> <strong>${{match.nodes_o.toLocaleString()}}</strong></div>
+                            <div class="stat-item"><span>Memoria:</span> <strong>${{match.memory_o_kb}}KB</strong></div>
+                        </div>
+                    </div>
+                    <div class="match-summary">
+                        <span>Total de jogadas: <strong>${{match.moves_count}}</strong></span>
+                        <span>Tempo total: <strong>${{match.total_time_ms}}ms</strong></span>
+                    </div>
+                `;
+            }}
+
+            // Initialize with default comparison
+            document.getElementById('algo-o').value = 'Alpha-Beta';
+            updateComparison();
+        </script>
+'''
 
     def _generate_tournament_section(self) -> str:
         """Generates the tournament results section."""
@@ -388,16 +746,25 @@ class ComparisonVisualizer:
         losses = {}
         ties = {}
         total_nodes = {}
+        total_time = {}
+        total_memory = {}
 
-        for name, _, _ in self.ALGORITHMS:
+        # Initialize with all algorithms from tournament (includes Random)
+        for name, _ in self.TOURNAMENT_ALGORITHMS:
             wins[name] = 0
             losses[name] = 0
             ties[name] = 0
             total_nodes[name] = 0
+            total_time[name] = 0
+            total_memory[name] = 0
 
         for match in self.tournament_results:
             total_nodes[match.player_x] += match.total_nodes_x
             total_nodes[match.player_o] += match.total_nodes_o
+            total_time[match.player_x] += match.time_x_ms
+            total_time[match.player_o] += match.time_o_ms
+            total_memory[match.player_x] = max(total_memory[match.player_x], match.memory_x_kb)
+            total_memory[match.player_o] = max(total_memory[match.player_o], match.memory_o_kb)
 
             if match.winner == PLAYER_X:
                 wins[match.player_x] += 1
@@ -419,9 +786,11 @@ class ComparisonVisualizer:
                 'ties': ties[name],
                 'losses': losses[name],
                 'points': points,
-                'nodes': total_nodes[name]
+                'nodes': total_nodes[name],
+                'time': total_time[name],
+                'memory': total_memory[name]
             })
-        ranking_data.sort(key=lambda x: (-x['points'], x['nodes']))
+        ranking_data.sort(key=lambda x: (-x['points'], x['time']))
 
         ranking_rows = ''
         for i, r in enumerate(ranking_data):
@@ -440,35 +809,41 @@ class ComparisonVisualizer:
                 <td style="color: var(--accent-orange);">{r['ties']}</td>
                 <td style="color: var(--accent-red);">{r['losses']}</td>
                 <td><strong>{r['points']}</strong></td>
-                <td>{r['nodes']:,}</td>
+                <td>{r['time']:.1f}ms</td>
+                <td>{r['memory']:.1f}KB</td>
             </tr>
 '''
 
-        # Generate match details with discrepancy ranking
-        # Sort by fastest games (fewer moves = more decisive)
-        sorted_matches = sorted(self.tournament_results, key=lambda m: m.moves_count)
+        # Generate match details - sorted by EXECUTION TIME (fastest first)
+        sorted_matches = sorted(self.tournament_results, key=lambda m: m.total_time_ms)
+
+        # Generate filter buttons for number of moves
+        all_move_counts = sorted(set(m.moves_count for m in self.tournament_results))
+        filter_buttons = '<button class="move-filter active" data-moves="all" onclick="filterByMoves(\'all\')">Todas</button>'
+        for moves in all_move_counts:
+            filter_buttons += f'<button class="move-filter" data-moves="{moves}" onclick="filterByMoves({moves})">{moves} jogadas</button>'
 
         match_rows = ''
-        for m in sorted_matches[:10]:  # Top 10 fastest/most decisive
+        for m in sorted_matches:
             winner_name = m.player_x if m.winner == PLAYER_X else (m.player_o if m.winner == PLAYER_O else 'Empate')
             result_class = 'win' if m.winner else 'tie'
 
             # Mini board visualization
-            board_html = '<div style="display: grid; grid-template-columns: repeat(3, 20px); gap: 2px; font-size: 12px;">'
+            board_html = '<div class="mini-board-small">'
             for cell in m.final_board:
                 cell_color = '#3b82f6' if cell == 'X' else '#ef4444' if cell == 'O' else '#334155'
-                board_html += f'<div style="width: 20px; height: 20px; background: {cell_color}; display: flex; align-items: center; justify-content: center; border-radius: 2px;">{cell if cell != " " else ""}</div>'
+                board_html += f'<div style="width: 18px; height: 18px; background: {cell_color}; display: flex; align-items: center; justify-content: center; border-radius: 2px; font-size: 10px;">{cell if cell != " " else ""}</div>'
             board_html += '</div>'
 
             match_rows += f'''
-            <tr>
+            <tr class="match-row" data-moves="{m.moves_count}">
                 <td>{m.player_x}</td>
-                <td>vs</td>
+                <td style="color: var(--text-secondary);">vs</td>
                 <td>{m.player_o}</td>
                 <td>{board_html}</td>
                 <td><span class="badge badge-{result_class}">{winner_name}</span></td>
                 <td>{m.moves_count}</td>
-                <td>{m.total_time_ms:.1f}</td>
+                <td><strong>{m.total_time_ms:.2f}ms</strong></td>
             </tr>
 '''
 
@@ -490,7 +865,8 @@ class ComparisonVisualizer:
                         <th>Empates</th>
                         <th>Derrotas</th>
                         <th>Pontos</th>
-                        <th>Nos Totais</th>
+                        <th>Tempo Total</th>
+                        <th>Memoria Max</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -498,20 +874,24 @@ class ComparisonVisualizer:
                 </tbody>
             </table>
 
-            <h3 style="color: var(--accent-blue); margin: 2rem 0 1rem;">Partidas Mais Rapidas</h3>
+            <h3 style="color: var(--accent-blue); margin: 2rem 0 1rem;">Partidas por Tempo de Execucao</h3>
             <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">
-                Partidas ordenadas por numero de jogadas (menos jogadas = decisao mais rapida)
+                Partidas ordenadas por tempo de execucao (mais rapidas primeiro).
+                Filtre por numero de jogadas:
             </p>
-            <table>
+            <div class="move-filters">
+                {filter_buttons}
+            </div>
+            <table id="matches-table">
                 <thead>
                     <tr>
                         <th>Jogador X</th>
                         <th></th>
                         <th>Jogador O</th>
-                        <th>Tabuleiro Final</th>
+                        <th>Tabuleiro</th>
                         <th>Resultado</th>
                         <th>Jogadas</th>
-                        <th>Tempo (ms)</th>
+                        <th>Tempo</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -519,6 +899,21 @@ class ComparisonVisualizer:
                 </tbody>
             </table>
         </div>
+
+        <script>
+            function filterByMoves(moves) {{
+                document.querySelectorAll('.move-filter').forEach(btn => btn.classList.remove('active'));
+                document.querySelector(`[data-moves="${{moves}}"]`).classList.add('active');
+
+                document.querySelectorAll('.match-row').forEach(row => {{
+                    if (moves === 'all' || row.dataset.moves === String(moves)) {{
+                        row.style.display = '';
+                    }} else {{
+                        row.style.display = 'none';
+                    }}
+                }});
+            }}
+        </script>
 '''
 
     def _generate_html_header(self) -> str:
@@ -671,13 +1066,13 @@ class ComparisonVisualizer:
             border-radius: 50%;
         }
 
-        .reduction-bar {
+        .reduction-bar, .memory-bar {
             display: flex;
             align-items: center;
             gap: 0.5rem;
         }
 
-        .reduction-bar .bar {
+        .reduction-bar .bar, .memory-bar .bar {
             height: 8px;
             border-radius: 4px;
             background: var(--accent-green);
@@ -771,6 +1166,236 @@ class ComparisonVisualizer:
             margin: 0.25rem 0;
         }
 
+        /* Recommendation Section Styles */
+        .recommendation-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .recommendation-card {
+            background: var(--bg-card);
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 2px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .recommendation-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .recommendation-card.speed { border-color: var(--accent-orange); }
+        .recommendation-card.memory { border-color: var(--accent-purple); }
+        .recommendation-card.efficiency { border-color: var(--accent-green); }
+        .recommendation-card.balanced { border-color: var(--accent-blue); }
+
+        .rec-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .recommendation-card h3 {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        .rec-algorithm {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .rec-detail {
+            color: var(--accent-blue);
+            font-size: 0.9rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .rec-description {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .slider-group {
+            margin: 1rem 0;
+        }
+
+        .slider-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+        }
+
+        .slider-group input[type="range"] {
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .custom-rec-result {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background: var(--bg-card);
+            border-radius: 8px;
+            font-size: 1.1rem;
+        }
+
+        .custom-rec-result #rec-result {
+            color: var(--accent-green);
+            font-size: 1.3rem;
+        }
+
+        /* Custom Comparison Section Styles */
+        .custom-comparison-controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 2rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .algo-selector {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .algo-selector label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .algo-selector select {
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border: 1px solid var(--bg-card);
+            font-size: 1rem;
+            min-width: 200px;
+            cursor: pointer;
+        }
+
+        .vs-label {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--accent-orange);
+        }
+
+        .comparison-result {
+            background: var(--bg-card);
+            padding: 2rem;
+            border-radius: 12px;
+        }
+
+        .match-result-detail {
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .match-result-detail h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .match-result-detail.win-x h3 { color: var(--accent-blue); }
+        .match-result-detail.win-o h3 { color: var(--accent-red); }
+        .match-result-detail.tie h3 { color: var(--accent-orange); }
+
+        .mini-board {
+            display: grid;
+            grid-template-columns: repeat(3, 40px);
+            gap: 4px;
+            justify-content: center;
+            margin: 1rem auto;
+        }
+
+        .mini-cell {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+
+        .cell-x { background: var(--accent-blue); color: white; }
+        .cell-o { background: var(--accent-red); color: white; }
+        .cell-empty { background: var(--bg-secondary); }
+
+        .comparison-stats {
+            display: flex;
+            justify-content: space-around;
+            gap: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .stat-column {
+            text-align: center;
+        }
+
+        .stat-column h4 {
+            color: var(--accent-blue);
+            margin-bottom: 1rem;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 2rem;
+            margin: 0.5rem 0;
+            color: var(--text-secondary);
+        }
+
+        .match-summary {
+            display: flex;
+            justify-content: center;
+            gap: 3rem;
+            margin-top: 1.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--bg-secondary);
+            color: var(--text-secondary);
+        }
+
+        /* Move filters */
+        .move-filters {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .move-filter {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .move-filter:hover {
+            background: rgba(59, 130, 246, 0.2);
+        }
+
+        .move-filter.active {
+            background: var(--accent-blue);
+            color: white;
+        }
+
+        .mini-board-small {
+            display: grid;
+            grid-template-columns: repeat(3, 18px);
+            gap: 2px;
+        }
+
         .footer {
             text-align: center;
             padding: 2rem;
@@ -826,8 +1451,8 @@ class ComparisonVisualizer:
                     <div class="label">Menor Tempo</div>
                 </div>
                 <div class="summary-card">
-                    <div class="value">{baseline:,}</div>
-                    <div class="label">Nos Minimax (Base)</div>
+                    <div class="value">{least_memory.memory_kb:.1f}KB</div>
+                    <div class="label">Menor Memoria ({least_memory.algorithm})</div>
                 </div>
             </div>
 
@@ -836,6 +1461,7 @@ class ComparisonVisualizer:
                 <ul>
                     <li><strong>{best.algorithm}</strong> avaliou apenas <strong>{best.nodes_evaluated:,}</strong> nos, uma reducao de <strong>{best_reduction:.1f}%</strong> em relacao ao Minimax puro.</li>
                     <li>O algoritmo mais rapido foi <strong>{fastest.algorithm}</strong> com <strong>{fastest.time_ms:.2f}ms</strong>.</li>
+                    <li><strong>{least_memory.algorithm}</strong> usou menos memoria: <strong>{least_memory.memory_kb:.1f}KB</strong>.</li>
                     <li>Todos os algoritmos chegaram a mesma decisao otima, garantindo corretude.</li>
                 </ul>
             </div>
@@ -879,7 +1505,6 @@ class ComparisonVisualizer:
                 <td>{r.time_ms:.2f}</td>
                 <td>{r.memory_kb:.1f}</td>
                 <td>{r.max_depth_reached}</td>
-                <td><span class="badge badge-{r.result_type.lower()}">{r.result_type}</span></td>
                 <td>{extra_html}</td>
             </tr>
 '''
@@ -896,7 +1521,6 @@ class ComparisonVisualizer:
                         <th>Tempo (ms)</th>
                         <th>Memoria (KB)</th>
                         <th>Prof. Max</th>
-                        <th>Resultado</th>
                         <th>Metricas Extras</th>
                     </tr>
                 </thead>
@@ -907,9 +1531,13 @@ class ComparisonVisualizer:
         </div>
 '''
 
-    def _generate_depth_analysis(self, depth_results: Dict[int, List[BenchmarkResult]], baseline: int) -> str:
+    def _generate_depth_analysis(self, depth_results: Dict[int, List[BenchmarkResult]]) -> str:
         if not depth_results:
             return ''
+
+        # Get unlimited results for baseline
+        unlimited_results = [r for r in self.results if r.depth_limit is None]
+        baseline_by_algo = {r.algorithm: r.nodes_evaluated for r in unlimited_results}
 
         tabs_html = ''
         content_html = ''
@@ -920,6 +1548,7 @@ class ComparisonVisualizer:
 
             rows = ''
             for r in results:
+                baseline = baseline_by_algo.get(r.algorithm, r.nodes_evaluated)
                 reduction = (1 - r.nodes_evaluated / baseline) * 100 if baseline > 0 else 0
                 color = self.COLORS.get(r.algorithm, '#666')
 
@@ -934,8 +1563,7 @@ class ComparisonVisualizer:
                     <td>{r.nodes_evaluated:,}</td>
                     <td>{reduction:.1f}%</td>
                     <td>{r.time_ms:.2f}</td>
-                    <td>{r.score}</td>
-                    <td><span class="badge badge-{r.result_type.lower()}">{r.result_type}</span></td>
+                    <td>{r.memory_kb:.1f}</td>
                 </tr>
 '''
 
@@ -946,10 +1574,9 @@ class ComparisonVisualizer:
                         <tr>
                             <th>Algoritmo</th>
                             <th>Nos Avaliados</th>
-                            <th>Reducao vs Minimax</th>
+                            <th>Reducao vs Ilimitado</th>
                             <th>Tempo (ms)</th>
-                            <th>Score</th>
-                            <th>Previsao</th>
+                            <th>Memoria (KB)</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -964,13 +1591,22 @@ class ComparisonVisualizer:
             <h2>Analise por Limite de Profundidade</h2>
             <p style="color: var(--text-secondary); margin-bottom: 1rem;">
                 Compare como os algoritmos se comportam com diferentes limites de profundidade.
-                Limites menores simulam situacoes onde tempo e computacionalmente limitado.
+                A reducao e calculada em relacao a execucao sem limite do mesmo algoritmo.
             </p>
             <div class="depth-tabs">
                 {tabs_html}
             </div>
             {content_html}
         </div>
+
+        <script>
+            function showDepth(depth) {{
+                document.querySelectorAll('.depth-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.depth-content').forEach(c => c.classList.remove('active'));
+                document.querySelector(`[data-depth="${{depth}}"]`).classList.add('active');
+                document.getElementById(`depth-${{depth}}`).classList.add('active');
+            }}
+        </script>
 '''
 
     def _generate_charts_section(self, unlimited: List[BenchmarkResult], depth_results: Dict) -> str:
@@ -978,24 +1614,37 @@ class ComparisonVisualizer:
         labels = [r.algorithm for r in unlimited]
         nodes_data = [r.nodes_evaluated for r in unlimited]
         time_data = [r.time_ms for r in unlimited]
+        memory_data = [r.memory_kb for r in unlimited]
         colors = [self.COLORS.get(r.algorithm, '#666') for r in unlimited]
 
-        # Depth comparison data
-        depth_labels = sorted(depth_results.keys(), reverse=True) if depth_results else []
-        depth_datasets = []
-        for name, color in self.COLORS.items():
-            data = []
-            for depth in depth_labels:
-                result = next((r for r in depth_results.get(depth, []) if r.algorithm == name), None)
-                data.append(result.nodes_evaluated if result else 0)
-            if any(data):
-                depth_datasets.append({
-                    'label': name,
-                    'data': data,
-                    'borderColor': color,
-                    'backgroundColor': color + '33',
-                    'fill': True
-                })
+        # Calculate efficiency scores for radar chart (normalized 0-100, higher is better)
+        max_nodes = max(r.nodes_evaluated for r in unlimited)
+        max_time = max(r.time_ms for r in unlimited)
+        max_memory = max(r.memory_kb for r in unlimited) if any(r.memory_kb > 0 for r in unlimited) else 1
+
+        radar_datasets = []
+        for r in unlimited:
+            # Invert scores so higher = better (100 = best, lower = worse)
+            node_efficiency = 100 * (1 - r.nodes_evaluated / max_nodes) if max_nodes > 0 else 100
+            time_efficiency = 100 * (1 - r.time_ms / max_time) if max_time > 0 else 100
+            memory_efficiency = 100 * (1 - r.memory_kb / max_memory) if max_memory > 0 else 100
+
+            # Add small bonus to avoid 0 for the worst performer
+            node_efficiency = max(10, node_efficiency)
+            time_efficiency = max(10, time_efficiency)
+            memory_efficiency = max(10, memory_efficiency)
+
+            color = self.COLORS.get(r.algorithm, '#666')
+            radar_datasets.append({
+                'label': r.algorithm,
+                'data': [round(node_efficiency, 1), round(time_efficiency, 1), round(memory_efficiency, 1)],
+                'borderColor': color,
+                'backgroundColor': color + '33',
+                'pointBackgroundColor': color
+            })
+
+        import json
+        radar_json = json.dumps(radar_datasets)
 
         return f'''
         <div class="section">
@@ -1010,9 +1659,15 @@ class ComparisonVisualizer:
                     <canvas id="timeChart"></canvas>
                 </div>
             </div>
-            <div class="chart-container" style="margin-top: 1.5rem;">
-                <h3 style="margin-bottom: 1rem; color: var(--text-secondary);">Nos Avaliados vs Profundidade</h3>
-                <canvas id="depthChart"></canvas>
+            <div class="chart-grid" style="margin-top: 1.5rem;">
+                <div class="chart-container">
+                    <h3 style="margin-bottom: 1rem; color: var(--text-secondary);">Memoria Utilizada (KB)</h3>
+                    <canvas id="memoryChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3 style="margin-bottom: 1rem; color: var(--text-secondary);">Comparativo de Eficiencia</h3>
+                    <canvas id="radarChart"></canvas>
+                </div>
             </div>
         </div>
 
@@ -1081,41 +1736,67 @@ class ComparisonVisualizer:
                 }}
             }});
 
-            // Depth comparison chart
-            new Chart(document.getElementById('depthChart'), {{
-                type: 'line',
+            // Memory chart
+            new Chart(document.getElementById('memoryChart'), {{
+                type: 'bar',
                 data: {{
-                    labels: {repr(['Prof. ' + str(d) for d in depth_labels])},
-                    datasets: {repr(depth_datasets).replace("'", '"')}
+                    labels: labels,
+                    datasets: [{{
+                        label: 'Memoria (KB)',
+                        data: {memory_data},
+                        backgroundColor: chartColors,
+                        borderRadius: 8
+                    }}]
                 }},
                 options: {{
                     responsive: true,
                     plugins: {{
-                        legend: {{
-                            labels: {{ color: '#94a3b8' }}
-                        }}
+                        legend: {{ display: false }}
                     }},
                     scales: {{
                         y: {{
-                            type: 'logarithmic',
                             grid: {{ color: '#334155' }},
                             ticks: {{ color: '#94a3b8' }}
                         }},
                         x: {{
-                            grid: {{ color: '#334155' }},
+                            grid: {{ display: false }},
                             ticks: {{ color: '#94a3b8' }}
                         }}
                     }}
                 }}
             }});
 
-            // Depth tab switching
-            function showDepth(depth) {{
-                document.querySelectorAll('.depth-tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.depth-content').forEach(c => c.classList.remove('active'));
-                document.querySelector(`[data-depth="${{depth}}"]`).classList.add('active');
-                document.getElementById(`depth-${{depth}}`).classList.add('active');
-            }}
+            // Radar chart - Efficiency comparison
+            new Chart(document.getElementById('radarChart'), {{
+                type: 'radar',
+                data: {{
+                    labels: ['Eficiencia de Nos', 'Eficiencia de Tempo', 'Eficiencia de Memoria'],
+                    datasets: {radar_json}
+                }},
+                options: {{
+                    responsive: true,
+                    plugins: {{
+                        legend: {{
+                            position: 'bottom',
+                            labels: {{ color: '#94a3b8', padding: 15 }}
+                        }}
+                    }},
+                    scales: {{
+                        r: {{
+                            min: 0,
+                            max: 100,
+                            ticks: {{
+                                stepSize: 20,
+                                color: '#94a3b8',
+                                backdropColor: 'transparent'
+                            }},
+                            grid: {{ color: '#334155' }},
+                            angleLines: {{ color: '#334155' }},
+                            pointLabels: {{ color: '#f1f5f9', font: {{ size: 11 }} }}
+                        }}
+                    }}
+                }}
+            }});
         </script>
 '''
 
