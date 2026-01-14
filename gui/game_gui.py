@@ -11,7 +11,6 @@ from ai.minimax_player import MinimaxPlayer
 from ai.alpha_beta_player import AlphaBetaPlayer
 from ai.alpha_beta_tt_player import AlphaBetaTTPlayer
 from ai.alpha_beta_symmetry_player import AlphaBetaSymmetryPlayer
-from ai.negascout_player import NegaScoutPlayer
 from utils.constants import PLAYER_X, PLAYER_O
 from visualization.game_history import GameHistoryCollector
 from visualization.game_visualizer import GameVisualizer
@@ -19,8 +18,7 @@ from visualization.tree_data import (
     MinimaxTreeCollector,
     AlphaBetaTreeCollector,
     AlphaBetaTTTreeCollector,
-    AlphaBetaSymmetryTreeCollector,
-    NegaScoutTreeCollector
+    AlphaBetaSymmetryTreeCollector
 )
 from visualization.tree_visualizer import TreeVisualizer
 from visualization.comparison_visualizer import ComparisonVisualizer
@@ -53,7 +51,6 @@ class GameGUI:
         'Alpha-Beta': AlphaBetaPlayer,
         'AB + Transposition': AlphaBetaTTPlayer,
         'AB + Simetria': AlphaBetaSymmetryPlayer,
-        'NegaScout': NegaScoutPlayer,
         'Random': RandomPlayer
     }
 
@@ -597,7 +594,7 @@ class GameGUI:
             self._make_move(move)
 
             if isinstance(player, (MinimaxPlayer, AlphaBetaPlayer, AlphaBetaTTPlayer,
-                                   AlphaBetaSymmetryPlayer, NegaScoutPlayer)):
+                                   AlphaBetaSymmetryPlayer)):
                 self.history.record_move(
                     player=player.symbol,
                     chosen_position=move,
@@ -806,7 +803,7 @@ class GameGUI:
 
         self.combo_tree_algo = ctk.CTkComboBox(
             algo_frame,
-            values=["Minimax", "Alpha-Beta", "Alpha-Beta + TT", "Alpha-Beta + Simetria", "NegaScout"],
+            values=["Minimax", "Alpha-Beta", "Alpha-Beta + TT", "Alpha-Beta + Simetria"],
             width=300,
             height=40,
             font=ctk.CTkFont(size=14),
@@ -910,7 +907,6 @@ class GameGUI:
             "Alpha-Beta": AlphaBetaTreeCollector,
             "Alpha-Beta + TT": AlphaBetaTTTreeCollector,
             "Alpha-Beta + Simetria": AlphaBetaSymmetryTreeCollector,
-            "NegaScout": NegaScoutTreeCollector
         }
 
         self.lbl_tree_processing.configure(text=f"Gerando arvore {algorithm}... Por favor aguarde.")

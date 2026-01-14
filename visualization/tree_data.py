@@ -15,7 +15,6 @@ class TreeNode:
     - Alpha-Beta: pruned branches, alpha/beta values
     - Transposition Table: TT hits
     - Symmetry: canonical form detection
-    - NegaScout: null-window searches, re-searches
     """
     board_state: List[str]
     player: str  # Player who will move from this state
@@ -42,11 +41,7 @@ class TreeNode:
     is_symmetric_duplicate: bool = False  # True if equivalent position was already evaluated
     symmetry_source: Optional[int] = None  # Move index of the original symmetric position
 
-    # NegaScout specific
-    is_null_window_search: bool = False
-    was_re_searched: bool = False
-    null_window_score: Optional[int] = None  # Score from null-window search before re-search
-
+    
     def to_dict(self) -> Dict[str, Any]:
         """Converts the node to a dictionary for JSON serialization."""
         base_dict = {
@@ -70,10 +65,6 @@ class TreeNode:
             # Symmetry
             'is_symmetric_duplicate': self.is_symmetric_duplicate,
             'symmetry_source': self.symmetry_source,
-            # NegaScout
-            'is_null_window_search': self.is_null_window_search,
-            'was_re_searched': self.was_re_searched,
-            'null_window_score': self.null_window_score
         }
         return base_dict
 
@@ -884,8 +875,6 @@ class AlphaBetaSymmetryTreeCollector:
             'ai_symbol': self.ai_symbol
         }
 
-
-class NegaScoutTreeCollector:
     """Collects NegaScout tree with null-window and re-search information."""
 
     def __init__(self, ai_symbol: str):

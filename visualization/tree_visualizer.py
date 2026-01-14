@@ -14,7 +14,6 @@ class TreeVisualizer:
     - Alpha-Beta: Pruned branches highlighted
     - Alpha-Beta + TT: Transposition table hits highlighted
     - Alpha-Beta + Symmetry: Symmetric positions highlighted
-    - NegaScout: Null-window and re-search nodes highlighted
     """
 
     def __init__(self, collector):
@@ -169,12 +168,6 @@ class TreeVisualizer:
         if 'Symmetry' in self.algorithm:
             base_legend += '''
             <div class="legend-item"><div class="legend-color" style="background: #8e44ad;"></div><span>Simetria</span></div>
-            '''
-
-        if 'NegaScout' in self.algorithm:
-            base_legend += '''
-            <div class="legend-item"><div class="legend-color" style="background: #e67e22;"></div><span>Null-Window</span></div>
-            <div class="legend-item"><div class="legend-color" style="background: #2980b9;"></div><span>Re-Search</span></div>
             '''
 
         return base_legend

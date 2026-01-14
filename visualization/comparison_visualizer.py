@@ -14,7 +14,6 @@ from ai.minimax_player import MinimaxPlayer
 from ai.alpha_beta_player import AlphaBetaPlayer
 from ai.alpha_beta_tt_player import AlphaBetaTTPlayer
 from ai.alpha_beta_symmetry_player import AlphaBetaSymmetryPlayer
-from ai.negascout_player import NegaScoutPlayer
 from ai.random_player import RandomPlayer
 from utils.constants import PLAYER_X, PLAYER_O
 
@@ -198,7 +197,6 @@ class ComparisonVisualizer:
         ('Alpha-Beta', AlphaBetaPlayer, DepthLimitedAlphaBeta),
         ('AB + Transposition', AlphaBetaTTPlayer, None),
         ('AB + Simetria', AlphaBetaSymmetryPlayer, None),
-        ('NegaScout', NegaScoutPlayer, None),
     ]
 
     # Algorithms for tournament (includes Random for varied game lengths)
@@ -207,7 +205,6 @@ class ComparisonVisualizer:
         ('Alpha-Beta', AlphaBetaPlayer),
         ('AB + Transposition', AlphaBetaTTPlayer),
         ('AB + Simetria', AlphaBetaSymmetryPlayer),
-        ('NegaScout', NegaScoutPlayer),
         ('Random', RandomPlayer),
     ]
 
@@ -216,7 +213,6 @@ class ComparisonVisualizer:
         'Alpha-Beta': '#3498db',
         'AB + Transposition': '#9b59b6',
         'AB + Simetria': '#2ecc71',
-        'NegaScout': '#f39c12',
         'Random': '#95a5a6',
     }
 
@@ -1830,7 +1826,6 @@ class ComparisonVisualizer:
                         <li><strong>Alpha-Beta:</strong> Poda de ramos garantidamente piores</li>
                         <li><strong>AB + TT:</strong> Memoizacao de estados ja avaliados</li>
                         <li><strong>AB + Simetria:</strong> Reducao usando grupo D4</li>
-                        <li><strong>NegaScout:</strong> Busca com janela nula</li>
                     </ul>
                 </div>
             </div>
