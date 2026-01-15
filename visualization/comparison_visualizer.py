@@ -24,6 +24,7 @@ class BenchmarkResult:
     algorithm: str
     depth_limit: Optional[int]
     nodes_evaluated: int
+    total_visits: int  # nodes_evaluated + tt_hits (matches tree visualization)
     time_ms: float
     memory_kb: float
     max_depth_reached: int
@@ -399,12 +400,19 @@ class ComparisonVisualizer:
         if 'symmetry_hits' in stats:
             extra['symmetry_hits'] = stats['symmetry_hits']
             extra['unique_positions'] = stats.get('unique_positions', 0)
-        # NegaScout stats removed
+
+        # Calculate total visits (matches tree visualization "Total de Nos")
+        # For TT: total = nodes_evaluated + tt_hits
+        # For Symmetry: total = nodes_evaluated + symmetry_hits
+        tt_hits = stats.get('tt_hits', 0)
+        symmetry_hits = stats.get('symmetry_hits', 0)
+        total_visits = stats['nodes_evaluated'] + tt_hits + symmetry_hits
 
         return BenchmarkResult(
             algorithm=name,
             depth_limit=depth_limit,
             nodes_evaluated=stats['nodes_evaluated'],
+            total_visits=total_visits,
             time_ms=stats['time_ms'],
             memory_kb=round(memory_kb, 2),
             max_depth_reached=max_depth_reached,
@@ -1512,6 +1520,9 @@ class ComparisonVisualizer:
 '''
 
     def _generate_unlimited_comparison(self, results: List[BenchmarkResult], baseline: int) -> str:
+        # Calculate baseline for total_visits (Minimax has no TT, so total_visits = nodes_evaluated)
+        baseline_total = next((r.total_visits for r in results if r.algorithm == 'Minimax'), baseline)
+
         rows = ''
         for r in results:
             reduction = (1 - r.nodes_evaluated / baseline) * 100 if baseline > 0 else 0
@@ -1538,6 +1549,7 @@ class ComparisonVisualizer:
                         {r.algorithm}
                     </div>
                 </td>
+                <td>{r.total_visits:,}</td>
                 <td>{r.nodes_evaluated:,}</td>
                 <td>
                     <div class="reduction-bar">
@@ -1555,10 +1567,15 @@ class ComparisonVisualizer:
         return f'''
         <div class="section">
             <h2>Comparacao Completa (Sem Limite de Profundidade)</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">
+                <strong>Total Visitas</strong> = todos os nos visitados (igual a visualizacao da arvore).
+                <strong>Nos Avaliados</strong> = nos realmente calculados (sem contar cache hits).
+            </p>
             <table>
                 <thead>
                     <tr>
                         <th>Algoritmo</th>
+                        <th>Total Visitas</th>
                         <th>Nos Avaliados</th>
                         <th>Reducao</th>
                         <th>Tempo (ms)</th>
@@ -1603,6 +1620,7 @@ class ComparisonVisualizer:
                             {r.algorithm}
                         </div>
                     </td>
+                    <td>{r.total_visits:,}</td>
                     <td>{r.nodes_evaluated:,}</td>
                     <td>{reduction:.1f}%</td>
                     <td>{r.time_ms:.2f}</td>
@@ -1616,6 +1634,7 @@ class ComparisonVisualizer:
                     <thead>
                         <tr>
                             <th>Algoritmo</th>
+                            <th>Total Visitas</th>
                             <th>Nos Avaliados</th>
                             <th>Reducao vs Ilimitado</th>
                             <th>Tempo (ms)</th>

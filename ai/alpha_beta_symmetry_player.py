@@ -154,13 +154,15 @@ class AlphaBetaSymmetryPlayer(BasePlayer):
         if stored_depth < depth:
             return None
 
-        self.symmetry_hits += 1
-
+        # Only count as hit when we actually use the value
         if flag == EXACT:
+            self.symmetry_hits += 1
             return stored_score
         elif flag == LOWER_BOUND and stored_score >= beta:
+            self.symmetry_hits += 1
             return stored_score
         elif flag == UPPER_BOUND and stored_score <= alpha:
+            self.symmetry_hits += 1
             return stored_score
 
         return None

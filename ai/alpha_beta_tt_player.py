@@ -128,13 +128,15 @@ class AlphaBetaTTPlayer(BasePlayer):
         if stored_depth < depth:
             return None
 
-        self.tt_hits += 1
-
+        # Only count as hit when we actually use the value
         if flag == EXACT:
+            self.tt_hits += 1
             return stored_score
         elif flag == LOWER_BOUND and stored_score >= beta:
+            self.tt_hits += 1
             return stored_score
         elif flag == UPPER_BOUND and stored_score <= alpha:
+            self.tt_hits += 1
             return stored_score
 
         return None

@@ -433,6 +433,10 @@ class AlphaBetaTTTreeCollector:
             board, 0, True, None,
             float('-inf'), float('inf')
         )
+        # Don't count root node to match player's counting
+        # (player counts nodes in recursive calls, not the initial state)
+        if self.nodes_evaluated > 0:
+            self.nodes_evaluated -= 1
         return self.root
 
     def _board_hash(self, board: Board) -> tuple:
@@ -468,7 +472,8 @@ class AlphaBetaTTTreeCollector:
         # Check TT for existing entry
         if board_hash in self.transposition_table:
             stored_score, stored_depth, flag = self.transposition_table[board_hash]
-            if stored_depth <= depth:
+            # Only use entries from equal or deeper searches (same logic as player)
+            if stored_depth >= depth:
                 if flag == 'EXACT':
                     node.tt_hit = True
                     node.tt_flag = flag
@@ -601,7 +606,8 @@ class AlphaBetaTTTreeCollector:
         hit_rate = (self.tt_hits / total_lookups * 100) if total_lookups > 0 else 0
 
         return {
-            'total_nodes': self.root.count_nodes(),
+            'total_nodes': self.nodes_evaluated + self.tt_hits,  # Matches benchmark
+            'nodes_evaluated': self.nodes_evaluated,
             'leaf_nodes': self.root.count_leaves(),
             'max_depth': self.root.get_max_depth(),
             'root_score': self.root.score,
@@ -675,6 +681,7 @@ class AlphaBetaSymmetryTreeCollector:
     def build_tree(self, board: Board) -> TreeNode:
         """
         Builds the Alpha-Beta Symmetry tree from the current board state.
+        Includes root-level symmetry optimization to match player behavior.
 
         Args:
             board: The current game board.
@@ -686,10 +693,71 @@ class AlphaBetaSymmetryTreeCollector:
         self.nodes_pruned = 0
         self.symmetry_hits = 0
         self.transposition_table.clear()
-        self.root = self._build_node(
-            board, 0, True, None,
-            float('-inf'), float('inf')
+
+        # Build root node manually (same as player's get_move structure)
+        canonical = self._get_canonical_form(board.cells)
+        self.root = TreeNode(
+            board_state=board.cells.copy(),
+            player=self.ai_symbol,
+            is_maximizing=True,
+            depth=0,
+            move_made=None,
+            alpha=float('-inf'),
+            beta=float('inf'),
+            canonical_form=canonical
         )
+
+        # Root-level symmetry optimization (matches player behavior)
+        available_moves = board.get_available_moves()
+        evaluated_canonical_forms = {}  # canonical -> (score, child_node)
+        alpha = float('-inf')
+        beta = float('inf')
+        best_score = float('-inf')
+
+        for move in available_moves:
+            board.make_move(move, self.ai_symbol)
+            move_canonical = self._get_canonical_form(board.cells)
+
+            if move_canonical in evaluated_canonical_forms:
+                # This position is symmetric to one already evaluated
+                # Create a node but mark it as symmetric duplicate
+                stored_score, source_node = evaluated_canonical_forms[move_canonical]
+
+                sym_node = TreeNode(
+                    board_state=board.cells.copy(),
+                    player=self.opponent,
+                    is_maximizing=False,
+                    depth=1,
+                    move_made=move,
+                    alpha=alpha,
+                    beta=beta,
+                    canonical_form=move_canonical,
+                    score=stored_score,
+                    is_terminal=True,
+                    tt_hit=True,
+                    is_symmetric_duplicate=True,
+                    symmetry_source=source_node.move_made
+                )
+                self.root.children.append(sym_node)
+                self.symmetry_hits += 1
+                board.undo_move(move)
+                continue
+
+            # Not symmetric - do full evaluation
+            child = self._build_node(board, 1, False, move, alpha, beta)
+            self.root.children.append(child)
+            board.undo_move(move)
+
+            evaluated_canonical_forms[move_canonical] = (child.score, child)
+
+            if child.score > best_score:
+                best_score = child.score
+
+            alpha = max(alpha, child.score)
+
+        self.root.score = best_score
+        self.root.alpha = alpha
+        self.root.beta = beta
         self.unique_positions = len(self.transposition_table)
         return self.root
 
@@ -723,7 +791,8 @@ class AlphaBetaSymmetryTreeCollector:
         # Check TT using canonical form
         if canonical in self.transposition_table:
             stored_score, stored_depth, flag = self.transposition_table[canonical]
-            if stored_depth <= depth:
+            # Only use entries from equal or deeper searches (same logic as player)
+            if stored_depth >= depth:
                 if flag == 'EXACT':
                     node.tt_hit = True
                     node.tt_flag = flag
@@ -854,7 +923,8 @@ class AlphaBetaSymmetryTreeCollector:
             return {}
 
         return {
-            'total_nodes': self.root.count_nodes(),
+            'total_nodes': self.nodes_evaluated + self.symmetry_hits,  # Matches benchmark formula
+            'nodes_evaluated': self.nodes_evaluated,
             'leaf_nodes': self.root.count_leaves(),
             'max_depth': self.root.get_max_depth(),
             'root_score': self.root.score,
