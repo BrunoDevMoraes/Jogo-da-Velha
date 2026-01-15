@@ -199,7 +199,7 @@ class ComparisonVisualizer:
         ('AB + Simetria', AlphaBetaSymmetryPlayer, None),
     ]
 
-    # Algorithms for tournament (includes Random for varied game lengths)
+    # Algorithms for tournament
     TOURNAMENT_ALGORITHMS = [
         ('Minimax', MinimaxPlayer),
         ('Alpha-Beta', AlphaBetaPlayer),
@@ -220,24 +220,41 @@ class ComparisonVisualizer:
         self.results: List[BenchmarkResult] = []
         self.tournament_results: List[MatchResult] = []
 
-    def run_tournament(self, num_games_per_matchup: int = 3):
-        """Runs a round-robin tournament between all algorithms.
-
-        Args:
-            num_games_per_matchup: Number of games per matchup (for Random variance).
-        """
+    def run_tournament(self, num_games_vs_random: int = 10):
+        """Runs a two-phase tournament: Deterministic and Vs Random."""
         self.tournament_results = []
 
-        for i, (name_x, class_x) in enumerate(self.TOURNAMENT_ALGORITHMS):
-            for j, (name_o, class_o) in enumerate(self.TOURNAMENT_ALGORITHMS):
-                if i != j:
-                    # Play multiple games if Random is involved for statistical variance
-                    has_random = 'Random' in name_x or 'Random' in name_o
-                    games_to_play = num_games_per_matchup if has_random else 1
+        # Identify algorithms
+        optimal_algos = [algo for algo in self.TOURNAMENT_ALGORITHMS if algo[0] != 'Random']
+        random_algo = next((algo for algo in self.TOURNAMENT_ALGORITHMS if algo[0] == 'Random'), None)
 
-                    for _ in range(games_to_play):
-                        result = self._play_match(name_x, class_x, name_o, class_o)
-                        self.tournament_results.append(result)
+        if not optimal_algos:
+            return
+
+        print(f"Iniciando Fase 1: Torneio Deterministico (Todos contra Todos - 1 jogo)...")
+        # PHASE 1: Deterministic Round-Robin (Optimal vs Optimal)
+        # 1 game per matchup is enough as they are deterministic
+        for i, (name_x, class_x) in enumerate(optimal_algos):
+            for j, (name_o, class_o) in enumerate(optimal_algos):
+                if i != j:
+                    result = self._play_match(name_x, class_x, name_o, class_o)
+                    self.tournament_results.append(result)
+
+        # PHASE 2: Vs Random Stress Test
+        if random_algo:
+            name_r, class_r = random_algo
+            print(f"Iniciando Fase 2: Teste vs Random ({num_games_vs_random} jogos por par)...")
+            
+            for name_opt, class_opt in optimal_algos:
+                # Optimal (X) vs Random (O)
+                for _ in range(num_games_vs_random):
+                    result = self._play_match(name_opt, class_opt, name_r, class_r)
+                    self.tournament_results.append(result)
+                
+                # Random (X) vs Optimal (O)
+                for _ in range(num_games_vs_random):
+                    result = self._play_match(name_r, class_r, name_opt, class_opt)
+                    self.tournament_results.append(result)
 
     def _play_match(
         self,
@@ -272,13 +289,13 @@ class ComparisonVisualizer:
 
                 time_x_ms += move_time
                 memory_x_kb = max(memory_x_kb, peak / 1024)
-                total_nodes_x += stats['nodes_evaluated']
+                total_nodes_x += stats.get('nodes_evaluated', 0)
                 board.make_move(move, PLAYER_X)
                 move_history.append({
                     'player': name_x,
                     'symbol': 'X',
                     'move': move,
-                    'nodes': stats['nodes_evaluated'],
+                    'nodes': stats.get('nodes_evaluated', 0),
                     'time_ms': move_time
                 })
                 current_player = PLAYER_O
@@ -292,13 +309,13 @@ class ComparisonVisualizer:
 
                 time_o_ms += move_time
                 memory_o_kb = max(memory_o_kb, peak / 1024)
-                total_nodes_o += stats['nodes_evaluated']
+                total_nodes_o += stats.get('nodes_evaluated', 0)
                 board.make_move(move, PLAYER_O)
                 move_history.append({
                     'player': name_o,
                     'symbol': 'O',
                     'move': move,
-                    'nodes': stats['nodes_evaluated'],
+                    'nodes': stats.get('nodes_evaluated', 0),
                     'time_ms': move_time
                 })
                 current_player = PLAYER_X
@@ -382,9 +399,7 @@ class ComparisonVisualizer:
         if 'symmetry_hits' in stats:
             extra['symmetry_hits'] = stats['symmetry_hits']
             extra['unique_positions'] = stats.get('unique_positions', 0)
-        if 'null_window_searches' in stats:
-            extra['null_window_searches'] = stats['null_window_searches']
-            extra['re_searches'] = stats.get('re_searches', 0)
+        # NegaScout stats removed
 
         return BenchmarkResult(
             algorithm=name,
@@ -484,22 +499,11 @@ class ComparisonVisualizer:
         best_memory = min(results, key=lambda r: r.memory_kb if r.memory_kb > 0 else float('inf'))
         best_nodes = min(results, key=lambda r: r.nodes_evaluated)
 
-        # Calculate scores for balanced recommendation
-        recommendations = []
+        # Simple string representation for JS
+        js_data = []
         for r in results:
-            # Normalize scores (lower is better)
-            time_score = r.time_ms / best_speed.time_ms if best_speed.time_ms > 0 else 1
-            memory_score = r.memory_kb / best_memory.memory_kb if best_memory.memory_kb > 0 else 1
-            nodes_score = r.nodes_evaluated / best_nodes.nodes_evaluated if best_nodes.nodes_evaluated > 0 else 1
-
-            recommendations.append({
-                'algorithm': r.algorithm,
-                'time_score': time_score,
-                'memory_score': memory_score,
-                'nodes_score': nodes_score,
-                'balanced_score': (time_score + memory_score + nodes_score) / 3,
-                'result': r
-            })
+            js_data.append(f"{{name: '{r.algorithm}', time: {r.time_ms}, memory: {r.memory_kb}, nodes: {r.nodes_evaluated}}}")
+        js_array = "[" + ",".join(js_data) + "]"
 
         return f'''
         <div class="section">
@@ -541,17 +545,6 @@ class ComparisonVisualizer:
                         Melhor escolha para problemas maiores onde cada no custa caro.
                     </p>
                 </div>
-
-                <div class="recommendation-card balanced">
-                    <div class="rec-icon">⚖️</div>
-                    <h3>Prioridade: Equilibrio</h3>
-                    <div class="rec-algorithm">{min(recommendations, key=lambda x: x['balanced_score'])['algorithm']}</div>
-                    <div class="rec-detail">Melhor balanco geral</div>
-                    <p class="rec-description">
-                        Bom desempenho em todas as metricas.
-                        Melhor escolha para uso geral sem requisitos especificos.
-                    </p>
-                </div>
             </div>
 
             <div class="priority-selector" style="margin-top: 2rem;">
@@ -578,13 +571,13 @@ class ComparisonVisualizer:
         </div>
 
         <script>
-            const algoData = {repr([{'name': r.algorithm, 'time': r.time_ms, 'memory': r.memory_kb, 'nodes': r.nodes_evaluated} for r in results])};
+            const algoData = {js_array};
 
             function updateRecommendation() {{
                 const speedW = parseInt(document.getElementById('speed-weight').value);
                 const memoryW = parseInt(document.getElementById('memory-weight').value);
                 const efficiencyW = parseInt(document.getElementById('efficiency-weight').value);
-                const total = speedW + memoryW + efficiencyW;
+                const total = speedW + memoryW + efficiencyW || 1;
 
                 document.getElementById('speed-val').textContent = Math.round(speedW/total*100) + '%';
                 document.getElementById('memory-val').textContent = Math.round(memoryW/total*100) + '%';
@@ -598,9 +591,9 @@ class ComparisonVisualizer:
                 let bestScore = Infinity;
 
                 algoData.forEach(algo => {{
-                    const score = (speedW/total) * (algo.time/minTime) +
-                                  (memoryW/total) * (algo.memory/minMemory) +
-                                  (efficiencyW/total) * (algo.nodes/minNodes);
+                    const score = (speedW * (algo.time/minTime)) + 
+                                  (memoryW * (algo.memory/minMemory)) + 
+                                  (efficiencyW * (algo.nodes/minNodes));
                     if (score < bestScore) {{
                         bestScore = score;
                         best = algo.name;
@@ -616,16 +609,16 @@ class ComparisonVisualizer:
 
     def _generate_custom_comparison_section(self) -> str:
         """Generates the custom algorithm pair comparison section."""
-        algo_names = [name for name, _, _ in self.ALGORITHMS]
+        algo_names = [name for name, _ in self.TOURNAMENT_ALGORITHMS]
         options = ''.join([f'<option value="{name}">{name}</option>' for name in algo_names])
 
         # Pre-generate all match data for JavaScript
+        # Use simple object construction to avoid JSON complications in f-strings
         match_data = {}
         for m in self.tournament_results:
             key = f"{m.player_x}_vs_{m.player_o}"
+            # Only store the last match if multiple exist (sufficient for demo)
             match_data[key] = {
-                'player_x': m.player_x,
-                'player_o': m.player_o,
                 'winner': m.winner,
                 'moves_count': m.moves_count,
                 'total_time_ms': round(m.total_time_ms, 2),
@@ -637,6 +630,14 @@ class ComparisonVisualizer:
                 'memory_o_kb': round(m.memory_o_kb, 2),
                 'final_board': m.final_board
             }
+        
+        # Manually build JS object string
+        js_obj_parts = []
+        for k, v in match_data.items():
+            # Convert inner dict to string
+            inner = str(v).replace("'", '"').replace('None', 'null')
+            js_obj_parts.append(f"'{k}': {inner}")
+        js_object_str = "{" + ", ".join(js_obj_parts) + "}"
 
         return f'''
         <div class="section">
@@ -667,7 +668,7 @@ class ComparisonVisualizer:
         </div>
 
         <script>
-            const matchData = {repr(match_data).replace("'", '"').replace('None', 'null')};
+            const matchData = {js_object_str};
 
             function updateComparison() {{
                 const algoX = document.getElementById('algo-x').value;
@@ -727,89 +728,157 @@ class ComparisonVisualizer:
             }}
 
             // Initialize with default comparison
-            document.getElementById('algo-o').value = 'Alpha-Beta';
             updateComparison();
         </script>
 '''
 
     def _generate_tournament_section(self) -> str:
-        """Generates the tournament results section."""
+        """Generates the tournament results section separated into phases."""
         if not self.tournament_results:
             return ''
 
-        # Calculate rankings
-        wins = {}
-        losses = {}
-        ties = {}
-        total_nodes = {}
-        total_time = {}
-        total_memory = {}
+        # Split results into two categories
+        # Deterministic: Both players are NOT Random
+        det_matches = [m for m in self.tournament_results if 'Random' not in m.player_x and 'Random' not in m.player_o]
+        # Random: One of the players IS Random
+        rnd_matches = [m for m in self.tournament_results if 'Random' in m.player_x or 'Random' in m.player_o]
 
-        # Initialize with all algorithms from tournament (includes Random)
-        for name, _ in self.TOURNAMENT_ALGORITHMS:
-            wins[name] = 0
-            losses[name] = 0
-            ties[name] = 0
-            total_nodes[name] = 0
-            total_time[name] = 0
-            total_memory[name] = 0
+        # --- SECTION 1: Deterministic League (Champions) ---
+        det_rows = ''
+        if det_matches:
+            # We only expect 1 match per pair, so we can just list them
+            for m in det_matches:
+                winner_name = m.player_x if m.winner == PLAYER_X else (m.player_o if m.winner == PLAYER_O else 'Empate')
+                result_class = 'win' if m.winner else 'tie'
+                
+                det_rows += f'''
+                <tr>
+                    <td>
+                        <div class="algo-name">
+                            <div class="algo-dot" style="background: {self.COLORS.get(m.player_x, '#666')}"></div>
+                            {m.player_x}
+                        </div>
+                    </td>
+                    <td style="color: var(--text-secondary); text-align:center;">vs</td>
+                    <td>
+                        <div class="algo-name">
+                            <div class="algo-dot" style="background: {self.COLORS.get(m.player_o, '#666')}"></div>
+                            {m.player_o}
+                        </div>
+                    </td>
+                    <td><span class="badge badge-{result_class}">{winner_name}</span></td>
+                    <td>{m.total_time_ms:.2f}ms</td>
+                    <td>{m.moves_count}</td>
+                </tr>'''
 
-        for match in self.tournament_results:
-            total_nodes[match.player_x] += match.total_nodes_x
-            total_nodes[match.player_o] += match.total_nodes_o
-            total_time[match.player_x] += match.time_x_ms
-            total_time[match.player_o] += match.time_o_ms
-            total_memory[match.player_x] = max(total_memory[match.player_x], match.memory_x_kb)
-            total_memory[match.player_o] = max(total_memory[match.player_o], match.memory_o_kb)
+        det_section = ''
+        if det_rows:
+            det_section = f'''
+            <h3 style="color: var(--accent-blue); margin-top: 2rem; border-bottom: 1px solid var(--bg-card); padding-bottom: 0.5rem;">
+                🏆 Liga dos Campeoes (Deterministico)
+            </h3>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                Confronto direto entre IAs otimas. Como sao deterministicas, apenas uma partida e necessaria.
+                <strong>Resultado esperado: 100% Empates.</strong>
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 25%">Jogador X</th>
+                        <th style="width: 5%"></th>
+                        <th style="width: 25%">Jogador O</th>
+                        <th>Resultado</th>
+                        <th>Tempo Total</th>
+                        <th>Jogadas</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {det_rows}
+                </tbody>
+            </table>
+            '''
 
-            if match.winner == PLAYER_X:
-                wins[match.player_x] += 1
-                losses[match.player_o] += 1
-            elif match.winner == PLAYER_O:
-                wins[match.player_o] += 1
-                losses[match.player_x] += 1
-            else:
-                ties[match.player_x] += 1
-                ties[match.player_o] += 1
+        # --- SECTION 2: Survival Challenge (Vs Random) ---
+        rnd_section = ''
+        if rnd_matches:
+            # Aggregate stats per algorithm (when playing AGAINST Random)
+            # We want to know how 'Minimax' performed against Random (both as X and O)
+            stats = {} # {algo_name: {games: 0, wins: 0, ties: 0, losses: 0}}
 
-        # Generate ranking table
-        ranking_data = []
-        for name in wins.keys():
-            points = wins[name] * 3 + ties[name]
-            ranking_data.append({
-                'name': name,
-                'wins': wins[name],
-                'ties': ties[name],
-                'losses': losses[name],
-                'points': points,
-                'nodes': total_nodes[name],
-                'time': total_time[name],
-                'memory': total_memory[name]
-            })
-        ranking_data.sort(key=lambda x: (-x['points'], x['time']))
+            for m in rnd_matches:
+                # Identify the AI (the one that is NOT Random)
+                ai_name = m.player_x if m.player_x != 'Random' else m.player_o
+                if ai_name == 'Random': continue # Should not happen based on logic
 
-        ranking_rows = ''
-        for i, r in enumerate(ranking_data):
-            medal = ['🥇', '🥈', '🥉'][i] if i < 3 else str(i + 1)
-            color = self.COLORS.get(r['name'], '#666')
-            ranking_rows += f'''
-            <tr>
-                <td style="text-align: center; font-size: 1.5rem;">{medal}</td>
-                <td>
-                    <div class="algo-name">
-                        <div class="algo-dot" style="background: {color}"></div>
-                        {r['name']}
-                    </div>
-                </td>
-                <td style="color: var(--accent-green);">{r['wins']}</td>
-                <td style="color: var(--accent-orange);">{r['ties']}</td>
-                <td style="color: var(--accent-red);">{r['losses']}</td>
-                <td><strong>{r['points']}</strong></td>
-                <td>{r['time']:.1f}ms</td>
-                <td>{r['memory']:.1f}KB</td>
-            </tr>
-'''
+                if ai_name not in stats:
+                    stats[ai_name] = {'games': 0, 'wins': 0, 'ties': 0, 'losses': 0}
+                
+                stats[ai_name]['games'] += 1
+                
+                # Check result from AI perspective
+                if m.winner is None:
+                    stats[ai_name]['ties'] += 1
+                elif (m.winner == 'X' and m.player_x == ai_name) or (m.winner == 'O' and m.player_o == ai_name):
+                    stats[ai_name]['wins'] += 1
+                else:
+                    stats[ai_name]['losses'] += 1
 
+            rnd_rows = ''
+            for name, s in stats.items():
+                win_rate = (s['wins'] / s['games']) * 100
+                tie_rate = (s['ties'] / s['games']) * 100
+                loss_rate = (s['losses'] / s['games']) * 100
+                
+                # Visual bar
+                bar_html = f'''
+                <div style="display: flex; height: 8px; width: 100%; background: #333; border-radius: 4px; overflow: hidden; margin-top: 5px;">
+                    <div style="width: {win_rate}%; background: var(--accent-green);"></div>
+                    <div style="width: {tie_rate}%; background: var(--accent-orange);"></div>
+                    <div style="width: {loss_rate}%; background: var(--accent-red);"></div>
+                </div>
+                '''
+
+                rnd_rows += f'''
+                <tr>
+                    <td>
+                        <div class="algo-name">
+                            <div class="algo-dot" style="background: {self.COLORS.get(name, '#666')}"></div>
+                            {name}
+                        </div>
+                    </td>
+                    <td>{s['games']}</td>
+                    <td style="color: var(--accent-green); font-weight: bold;">{s['wins']} ({win_rate:.0f}%)</td>
+                    <td style="color: var(--accent-orange); font-weight: bold;">{s['ties']} ({tie_rate:.0f}%)</td>
+                    <td style="color: var(--accent-red); font-weight: bold;">{s['losses']} ({loss_rate:.0f}%)</td>
+                    <td style="width: 150px;">{bar_html}</td>
+                </tr>'''
+
+            rnd_section = f'''
+            <h3 style="color: var(--accent-purple); margin-top: 3rem; border-bottom: 1px solid var(--bg-card); padding-bottom: 0.5rem;">
+                🎲 Desafio de Sobrevivencia (vs Random)
+            </h3>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                Teste de robustez e consistencia. Cada algoritmo joga multiplas partidas contra o jogador Aleatorio.
+                <strong>Objetivo: Nao perder nenhuma partida.</strong>
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Algoritmo</th>
+                        <th>Jogos</th>
+                        <th>Vitorias</th>
+                        <th>Empates</th>
+                        <th>Derrotas</th>
+                        <th>Distribuicao</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rnd_rows}
+                </tbody>
+            </table>
+            '''
+
+        # --- SECTION 3: Detailed Match Log (Matches by Time) ---
         # Generate match details - sorted by EXECUTION TIME (fastest first)
         sorted_matches = sorted(self.tournament_results, key=lambda m: m.total_time_ms)
 
@@ -845,35 +914,13 @@ class ComparisonVisualizer:
 
         return f'''
         <div class="section">
-            <h2>Torneio: Todos contra Todos</h2>
-            <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
-                Cada algoritmo jogou contra todos os outros, alternando entre X e O.
-                Como todos jogam de forma otima, espera-se empates na maioria dos casos.
-            </p>
+            <h2>Torneio de Algoritmos</h2>
+            {det_section}
+            {rnd_section}
 
-            <h3 style="color: var(--accent-blue); margin: 1.5rem 0 1rem;">Ranking Geral</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th style="width: 60px;">#</th>
-                        <th>Algoritmo</th>
-                        <th>Vitorias</th>
-                        <th>Empates</th>
-                        <th>Derrotas</th>
-                        <th>Pontos</th>
-                        <th>Tempo Total</th>
-                        <th>Memoria Max</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {ranking_rows}
-                </tbody>
-            </table>
-
-            <h3 style="color: var(--accent-blue); margin: 2rem 0 1rem;">Partidas por Tempo de Execucao</h3>
+            <h3 style="color: var(--accent-blue); margin: 3rem 0 1rem;">Log Detalhado de Partidas</h3>
             <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">
-                Partidas ordenadas por tempo de execucao (mais rapidas primeiro).
-                Filtre por numero de jogadas:
+                Todas as partidas ordenadas por tempo de execucao.
             </p>
             <div class="move-filters">
                 {filter_buttons}

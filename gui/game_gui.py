@@ -162,7 +162,7 @@ class GameGUI:
             corner_radius=10,
             fg_color=self.COLORS['bg_cell'],
             hover_color=self.COLORS['accent_o'],
-            command=lambda: self._start_game('PVE')
+            command=self._show_pve_selection
         )
         btn_pve.pack(pady=8, padx=20, fill="x")
 
@@ -236,6 +236,105 @@ class GameGUI:
             text_color=self.COLORS['text_secondary']
         )
         info_label.pack(pady=(0, 10))
+
+    def _show_pve_selection(self):
+        """Shows the Player vs AI selection screen."""
+        self._clear_container()
+
+        # Back button
+        back_btn = ctk.CTkButton(
+            self.container,
+            text="< Voltar",
+            width=80,
+            height=30,
+            font=ctk.CTkFont(size=12),
+            fg_color="transparent",
+            hover_color=self.COLORS['bg_card'],
+            text_color=self.COLORS['text_secondary'],
+            command=self._create_main_menu
+        )
+        back_btn.pack(anchor="w", pady=(0, 10))
+
+        # Title
+        title = ctk.CTkLabel(
+            self.container,
+            text="Jogador vs IA",
+            font=ctk.CTkFont(size=28, weight="bold"),
+            text_color=self.COLORS['text_primary']
+        )
+        title.pack(pady=(10, 5))
+
+        subtitle = ctk.CTkLabel(
+            self.container,
+            text="Configure o seu desafio",
+            font=ctk.CTkFont(size=14),
+            text_color=self.COLORS['text_secondary']
+        )
+        subtitle.pack(pady=(0, 30))
+
+        # Opponent selection
+        settings_frame = ctk.CTkFrame(self.container, fg_color=self.COLORS['bg_card'], corner_radius=15)
+        settings_frame.pack(fill="x", pady=10)
+
+        ctk.CTkLabel(
+            settings_frame,
+            text="Escolha seu Oponente (IA)",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=self.COLORS['text_primary']
+        ).pack(pady=(20, 10))
+
+        self.combo_pve_algo = ctk.CTkComboBox(
+            settings_frame,
+            values=list(self.PLAYER_TYPES.keys()),
+            width=250,
+            height=40,
+            font=ctk.CTkFont(size=14),
+            dropdown_font=ctk.CTkFont(size=13),
+            fg_color=self.COLORS['bg_cell'],
+            border_color=self.COLORS['accent_o'],
+            button_color=self.COLORS['accent_o']
+        )
+        self.combo_pve_algo.set("Minimax")
+        self.combo_pve_algo.pack(pady=(0, 20))
+
+        # Side selection
+        side_frame = ctk.CTkFrame(self.container, fg_color=self.COLORS['bg_card'], corner_radius=15)
+        side_frame.pack(fill="x", pady=10)
+
+        ctk.CTkLabel(
+            side_frame,
+            text="Quem comeca?",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=self.COLORS['text_primary']
+        ).pack(pady=(20, 10))
+
+        self.combo_pve_side = ctk.CTkComboBox(
+            side_frame,
+            values=["Voce (Joga com X)", "IA (Joga com X)"],
+            width=250,
+            height=40,
+            font=ctk.CTkFont(size=14),
+            dropdown_font=ctk.CTkFont(size=13),
+            fg_color=self.COLORS['bg_cell'],
+            border_color=self.COLORS['accent_x'],
+            button_color=self.COLORS['accent_x']
+        )
+        self.combo_pve_side.set("Voce (Joga com X)")
+        self.combo_pve_side.pack(pady=(0, 20))
+
+        # Start button
+        btn_start = ctk.CTkButton(
+            self.container,
+            text="Iniciar Jogo",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            height=50,
+            corner_radius=12,
+            fg_color=self.COLORS['accent_green'],
+            hover_color="#22c55e",
+            text_color=self.COLORS['bg_dark'],
+            command=self._start_pve_game
+        )
+        btn_start.pack(pady=30, fill="x")
 
     def _show_ai_selection(self):
         """Shows the AI selection screen."""
@@ -381,6 +480,23 @@ class GameGUI:
 
         self._start_game('EVE')
 
+    def _start_pve_game(self):
+        """Starts the Player vs AI game with selected configuration."""
+        algo_name = self.combo_pve_algo.get()
+        side_selection = self.combo_pve_side.get()
+        ai_class = self.PLAYER_TYPES[algo_name]
+
+        if "Voce (Joga com X)" in side_selection:
+            # Human is X, AI is O
+            self.player_x = None  # Human
+            self.player_o = ai_class(PLAYER_O)
+        else:
+            # AI is X, Human is O
+            self.player_x = ai_class(PLAYER_X)
+            self.player_o = None  # Human
+
+        self._start_game('PVE')
+
     def _start_game(self, mode: str):
         """Starts a new game."""
         self.game_mode = mode
@@ -390,15 +506,22 @@ class GameGUI:
         self.history.clear()
         self.game_finished = False
 
-        if mode == 'PVE':
-            self.player_o = MinimaxPlayer(PLAYER_O)
-        elif mode == 'EVE' and self.player_x is None:
-            self.player_x = MinimaxPlayer(PLAYER_X)
-            self.player_o = MinimaxPlayer(PLAYER_O)
+        # Reset players for PVP mode
+        if mode == 'PVP':
+            self.player_x = None
+            self.player_o = None
 
         self._create_game_screen()
 
-        if mode == 'EVE':
+        # Check if AI should start (first player is AI)
+        first_player_is_ai = False
+        if self.current_player == PLAYER_X and self.player_x is not None:
+            first_player_is_ai = True
+        elif self.current_player == PLAYER_O and self.player_o is not None:
+            first_player_is_ai = True
+
+        # Trigger AI turn if needed (works for both PVE and EVE)
+        if first_player_is_ai:
             self.root.after(500, self._ai_turn)
 
     def _create_game_screen(self):
@@ -573,6 +696,7 @@ class GameGUI:
 
         self._make_move(index)
 
+        # If it's PVE and game not over, trigger AI
         if self.game_mode == 'PVE' and not GameLogic.is_terminal(self.board):
             self.lbl_processing.configure(text="IA pensando...")
             self.root.update()
@@ -593,10 +717,16 @@ class GameGUI:
         if move != -1:
             self._make_move(move)
 
+            # Record history only for AI players
             if isinstance(player, (MinimaxPlayer, AlphaBetaPlayer, AlphaBetaTTPlayer,
                                    AlphaBetaSymmetryPlayer)):
+                
+                # Extract clean algorithm name (e.g., "Alpha-Beta (O)" -> "Alpha-Beta")
+                algo_name = player.get_name().split(' (')[0]
+                
                 self.history.record_move(
                     player=player.symbol,
+                    algorithm=algo_name,  # Pass dynamic algorithm name
                     chosen_position=move,
                     chosen_score=stats.get('chosen_score', 0),
                     board_before=board_before,

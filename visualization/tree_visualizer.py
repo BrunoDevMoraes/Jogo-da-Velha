@@ -106,11 +106,11 @@ class TreeVisualizer:
         if 'tt_hits' in stats:
             base_stats += f'''
             <div class="stat">
-                <div class="stat-value" style="color: #f1c40f;">{stats['tt_hits']:,}</div>
+                <div class="stat-value" style="color: #F4EEB5;">{stats['tt_hits']:,}</div>
                 <div class="stat-label">TT Hits</div>
             </div>
             <div class="stat">
-                <div class="stat-value" style="color: #f1c40f;">{stats.get('tt_hit_rate', 0)}%</div>
+                <div class="stat-value" style="color: #F4EEB5;">{stats.get('tt_hit_rate', 0)}%</div>
                 <div class="stat-label">Taxa TT</div>
             </div>
             '''
@@ -118,26 +118,16 @@ class TreeVisualizer:
         if 'symmetry_hits' in stats:
             base_stats += f'''
             <div class="stat">
-                <div class="stat-value" style="color: #9b59b6;">{stats['symmetry_hits']:,}</div>
+                <div class="stat-value" style="color: #FDBED2;">{stats['symmetry_hits']:,}</div>
                 <div class="stat-label">Simetrias</div>
             </div>
             <div class="stat">
-                <div class="stat-value" style="color: #9b59b6;">{stats.get('unique_positions', 0):,}</div>
+                <div class="stat-value" style="color: #FDBED2;">{stats.get('unique_positions', 0):,}</div>
                 <div class="stat-label">Pos. Unicas</div>
             </div>
             '''
 
-        if 'null_window_searches' in stats:
-            base_stats += f'''
-            <div class="stat">
-                <div class="stat-value" style="color: #e67e22;">{stats['null_window_searches']:,}</div>
-                <div class="stat-label">Null-Window</div>
-            </div>
-            <div class="stat">
-                <div class="stat-value" style="color: #3498db;">{stats.get('re_searches', 0):,}</div>
-                <div class="stat-label">Re-Searches</div>
-            </div>
-            '''
+        
 
         return base_stats
 
@@ -148,7 +138,7 @@ class TreeVisualizer:
 
         base_legend = f'''
         <div class="legend-item"><div class="legend-color" style="background: #3498db;"></div><span>MAX ({ai_symbol})</span></div>
-        <div class="legend-item"><div class="legend-color" style="background: #9b59b6;"></div><span>MIN ({opponent})</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #8e44ad;"></div><span>MIN ({opponent})</span></div>
         <div class="legend-item"><div class="legend-color" style="background: #2ecc71;"></div><span>{ai_symbol} Vence</span></div>
         <div class="legend-item"><div class="legend-color" style="background: #f39c12;"></div><span>Empate</span></div>
         <div class="legend-item"><div class="legend-color" style="background: #e74c3c;"></div><span>{ai_symbol} Perde</span></div>
@@ -162,12 +152,12 @@ class TreeVisualizer:
 
         if 'TT' in self.algorithm:
             base_legend += '''
-            <div class="legend-item"><div class="legend-color" style="background: #f1c40f;"></div><span>TT Hit</span></div>
+            <div class="legend-item"><div class="legend-color" style="background: #F4EEB5;"></div><span>TT Hit</span></div>
             '''
 
         if 'Symmetry' in self.algorithm:
             base_legend += '''
-            <div class="legend-item"><div class="legend-color" style="background: #8e44ad;"></div><span>Simetria</span></div>
+            <div class="legend-item"><div class="legend-color" style="background: #FDBED2;"></div><span>Simetria</span></div>
             '''
 
         return base_legend
@@ -276,8 +266,8 @@ class TreeVisualizer:
             margin-left: 5px;
         }}
         .badge-pruned {{ background: #e74c3c; }}
-        .badge-tt {{ background: #f1c40f; color: #000; }}
-        .badge-symmetry {{ background: #9b59b6; }}
+        .badge-tt {{ background: #F4EEB5; color: #000; }}
+        .badge-symmetry {{ background: #8e44ad; }}
         .badge-null {{ background: #e67e22; }}
         .badge-research {{ background: #3498db; }}
     </style>
@@ -324,8 +314,9 @@ class TreeVisualizer:
             const data = d.data.data;
 
             // Algorithm-specific coloring
-            if (data.tt_hit) return '#f1c40f';  // TT hit - yellow
-            if (data.is_symmetric_duplicate) return '#8e44ad';  // Symmetry - purple
+            
+            if (data.is_symmetric_duplicate) return '#FDBED2';  // Symmetry - pink
+            if (data.tt_hit) return '#F4EEB5';  // TT hit - yellow            
             if (data.is_null_window_search && !data.was_re_searched) return '#e67e22';  // Null-window - orange
             if (data.was_re_searched) return '#2980b9';  // Re-search - blue
 
@@ -336,7 +327,7 @@ class TreeVisualizer:
                 return '#e74c3c';
             }}
 
-            return data.is_max ? '#3498db' : '#9b59b6';
+            return data.is_max ? '#3498db' : '#8e44ad';
         }}
 
         function getNodeStroke(d) {{
@@ -536,8 +527,8 @@ class TreeVisualizer:
             margin-left: 5px;
         }}
         .badge-pruned {{ background: #e74c3c; }}
-        .badge-tt {{ background: #f1c40f; color: #000; }}
-        .badge-symmetry {{ background: #9b59b6; }}
+        .badge-tt {{ background: #F4EEB5; color: #000; }}
+        .badge-symmetry {{ background: #FDBED2; }}
         .badge-null {{ background: #e67e22; }}
         .badge-research {{ background: #3498db; }}
     </style>
@@ -588,8 +579,8 @@ class TreeVisualizer:
 
         function getColor(d) {{
             const data = d.data;
-            if (data.tt_hit) return '#f1c40f';
-            if (data.is_symmetric_duplicate) return '#8e44ad';
+            if (data.tt_hit) return '#F4EEB5';
+            if (data.is_symmetric_duplicate) return '#FDBED2';
             if (data.is_null_window_search && !data.was_re_searched) return '#e67e22';
             if (data.was_re_searched) return '#2980b9';
             if (data.is_terminal) {{
@@ -597,7 +588,7 @@ class TreeVisualizer:
                 if (data.result === 'TIE') return '#f39c12';
                 return '#e74c3c';
             }}
-            return data.is_max ? '#3498db' : '#9b59b6';
+            return data.is_max ? '#3498db' : '#8e44ad';
         }}
 
         function boardToString(board) {{
@@ -766,8 +757,8 @@ class TreeVisualizer:
             margin-left: 5px;
         }}
         .badge-pruned {{ background: #e74c3c; }}
-        .badge-tt {{ background: #f1c40f; color: #000; }}
-        .badge-symmetry {{ background: #9b59b6; }}
+        .badge-tt {{ background: #F4EEB5; color: #000; }}
+        .badge-symmetry {{ background: #FDBED2; }}
         .badge-null {{ background: #e67e22; }}
         .badge-research {{ background: #3498db; }}
     </style>
@@ -806,8 +797,8 @@ class TreeVisualizer:
 
         function getColor(d) {{
             const data = d.data;
-            if (data.tt_hit) return '#f1c40f';
-            if (data.is_symmetric_duplicate) return '#8e44ad';
+            if (data.tt_hit) return '#F4EEB5';
+            if (data.is_symmetric_duplicate) return '#FDBED2';
             if (data.is_null_window_search && !data.was_re_searched) return '#e67e22';
             if (data.was_re_searched) return '#2980b9';
             if (data.is_terminal) {{
@@ -815,7 +806,7 @@ class TreeVisualizer:
                 if (data.result === 'TIE') return '#f39c12';
                 return '#e74c3c';
             }}
-            return data.is_max ? '#3498db' : '#9b59b6';
+            return data.is_max ? '#3498db' : '#8e44ad';
         }}
 
         function boardToString(board) {{
